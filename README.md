@@ -29,17 +29,26 @@ terminal core (`vtparse.c`, `screen.c`, and most of `vt100.c`) is a direct
 port of VT100-PI's — see [VT100-PI-ZERO/README.md](VT100-PI-ZERO/README.md#architecture)
 for exactly what ported unmodified versus what's new.
 
-## Getting started
+## Install
 
-- **VT100-PI** (Pico 2 W): see [VT100-PI/CLAUDE.md](VT100-PI/CLAUDE.md) for
-  build/flash commands and architecture, or just open the folder in VS Code
-  with the Raspberry Pi Pico extension.
-- **VT100-PI-ZERO** (Pi Zero 2 W): see
-  [VT100-PI-ZERO/README.md](VT100-PI-ZERO/README.md) for build, run, and
-  boot-integration instructions.
+The fastest path for either board is a prebuilt binary from
+[Releases](../../releases) — every push to `main` rebuilds both projects in
+CI and attaches the output. No toolchain needed.
 
-Compiled firmware/binaries from CI are attached to
-[Releases](../../releases) after each build.
+**VT100-PI (Pico 2 W):** download `VT100-PI.uf2` from the latest release,
+hold BOOTSEL while plugging the Pico in over USB (it mounts as `RPI-RP2`),
+then drag-drop the `.uf2` onto it. Full build-from-source and flashing
+options (picotool, openocd/SWD) in [VT100-PI/README.md](VT100-PI/README.md).
+
+**VT100-PI-ZERO (Pi Zero 2 W):** download `vt100-pi-zero-aarch64` from the
+latest release, copy it to the Pi (`scp`, or straight off a USB stick), and
+`chmod +x` it. It needs root for raw `/dev/dri`/`/dev/input` access:
+`sudo ./vt100-pi-zero-aarch64`. Full build-from-source, dependencies, and
+boot-to-terminal (systemd) setup in
+[VT100-PI-ZERO/README.md](VT100-PI-ZERO/README.md).
+
+Building from source instead of using a release build is documented in each
+project's own README, linked above.
 
 ## Repo layout
 
