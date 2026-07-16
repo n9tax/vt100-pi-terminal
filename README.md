@@ -13,7 +13,7 @@ terminal, on-screen Setup menu), built for two very different boards:
 | Network | CYW43 + raw lwIP | POSIX sockets (planned) |
 | Status | Working | MVP: video + keyboard + serial |
 
-CI: [![VT100-PI](https://github.com/n9tax/vt100-terminal/actions/workflows/vt100-pi.yml/badge.svg)](https://github.com/n9tax/vt100-terminal/actions/workflows/vt100-pi.yml) [![VT100-PI-ZERO](https://github.com/n9tax/vt100-terminal/actions/workflows/vt100-pi-zero.yml/badge.svg)](https://github.com/n9tax/vt100-terminal/actions/workflows/vt100-pi-zero.yml)
+CI: [![VT100-PI](https://github.com/n9tax/vt100-pi-terminal/actions/workflows/vt100-pi.yml/badge.svg)](https://github.com/n9tax/vt100-pi-terminal/actions/workflows/vt100-pi.yml) [![VT100-PI-ZERO](https://github.com/n9tax/vt100-pi-terminal/actions/workflows/vt100-pi-zero.yml/badge.svg)](https://github.com/n9tax/vt100-pi-terminal/actions/workflows/vt100-pi-zero.yml)
 
 ## Why two implementations
 
