@@ -1,0 +1,18 @@
+[Unit]
+Description=VT100-PI-ZERO hardware terminal
+Conflicts=getty@tty1.service
+After=getty@tty1.service systemd-udevd.service
+Wants=systemd-udevd.service
+
+[Service]
+ExecStart=/usr/local/bin/vt100-pi-zero
+Restart=always
+RestartSec=1
+User=root
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

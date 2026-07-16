@@ -1,0 +1,31 @@
+
+
+sudo bash -c 'stty -F /dev/ttyS0 sane 9600 cs8 -cstopb -parenb clocal -crtscts; TERM=vt100 setsid bash -i <>/dev/ttyS0 >&0 2>&0'
+
+Make that TERM permanent by putting it in the shell launch: change TERM=vt100 to TERM=xterm-16color in your sudo bash -c '…' command, or add export TERM=xterm-16color to your ~/.bashrc.
+
+export TERM=xterm-16color
+htop
+
+
+TODO:
+50% Add network capability ssh and telnet if possible.
+0% vt100 ok spash screen
+0% add a page in settings so we can store a list of telnet sites.
+0% More colors
+50% Smooth scrolling
+
+
+
+Recovery (do this first)
+The firmware itself is almost certainly intact — the problem is the saved sector and/or a fault-reboot loop. To be 100% clean, erase all flash, then reflash:
+
+
+# hold BOOTSEL while plugging in USB so it mounts as RPI-RP2, then:
+picotool erase        # wipes flash (clears the bad settings sector)
+picotool reboot -u    # back to BOOTSEL
+# then drag-drop the new build/VT100-PI.uf2 (I'm rebuilding it session-safe now)
+If you don't have flash_nuke, picotool erase -a does the same. This clears whatever the save wrote.
+
+Let me revert to session-only settings (no flash write — safe) and add a boot-loop guard to the fault handler so a fault can never brick it again:
+

@@ -1,0 +1,7 @@
+# Build output (both projects)
+build/
+compile_commands.json
+
+# Editor/OS cruft
+.DS_Store
+Thumbs.db

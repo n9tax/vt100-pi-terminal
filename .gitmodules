@@ -1,0 +1,3 @@
+[submodule "VT100-PI/lib/Pico-PIO-USB"]
+	path = VT100-PI/lib/Pico-PIO-USB
+	url = https://github.com/sekigon-gonnoc/Pico-PIO-USB
