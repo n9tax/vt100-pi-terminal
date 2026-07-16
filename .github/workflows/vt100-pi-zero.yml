@@ -1,0 +1,38 @@
+name: VT100-PI-ZERO (Pi Zero 2 W)
+
+on:
+  push:
+    branches: [main]
+    paths: ["VT100-PI-ZERO/**", ".github/workflows/vt100-pi-zero.yml"]
+  pull_request:
+    paths: ["VT100-PI-ZERO/**", ".github/workflows/vt100-pi-zero.yml"]
+  workflow_dispatch:
+
+jobs:
+  # Primary: a real aarch64 Linux build on a GitHub-hosted ARM64 runner, using
+  # the same libdrm/evdev headers the Pi Zero 2 W itself has. Whether this
+  # runner label is available depends on the account's plan; if this job
+  # fails to even get scheduled (not a build failure — a "no runner" queue
+  # timeout), switch `runs-on` below to `ubuntu-latest` as a compile-check
+  # fallback (still catches real API misuse against generic Linux headers,
+  # just produces an x86_64 binary instead of one deployable to the Pi).
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libdrm-dev pkg-config
+
+      - name: Configure
+        run: cmake -S VT100-PI-ZERO -B VT100-PI-ZERO/build
+
+      - name: Build
+        run: cmake --build VT100-PI-ZERO/build --verbose
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vt100-pi-zero-aarch64
+          path: VT100-PI-ZERO/build/vt100-pi-zero

@@ -1,0 +1,38 @@
+name: VT100-PI (Pico 2 W)
+
+on:
+  push:
+    branches: [main]
+    paths: ["VT100-PI/**", ".github/workflows/vt100-pi.yml"]
+  pull_request:
+    paths: ["VT100-PI/**", ".github/workflows/vt100-pi.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PICO_SDK_FETCH_FROM_GIT: 1
+      PICO_SDK_FETCH_FROM_GIT_TAG: "2.3.0"   # matches sdkVersion in VT100-PI/CMakeLists.txt
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # pulls in lib/Pico-PIO-USB
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential python3
+
+      - name: Configure
+        run: cmake -S VT100-PI -B VT100-PI/build -G Ninja
+
+      - name: Build
+        run: cmake --build VT100-PI/build --verbose
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vt100-pi-firmware
+          path: |
+            VT100-PI/build/VT100-PI.uf2
+            VT100-PI/build/VT100-PI.elf
