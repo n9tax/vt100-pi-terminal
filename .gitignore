@@ -5,3 +5,6 @@ compile_commands.json
 # Editor/OS cruft
 .DS_Store
 Thumbs.db
+
+# Claude Code project guidance — local only, not pushed
+CLAUDE.md
