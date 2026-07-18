@@ -27,7 +27,7 @@ small C program, and the Zero 2 W's quad-core Cortex-A53 builds it in
 seconds):
 
 ```
-sudo apt install build-essential cmake libdrm-dev pkg-config
+sudo apt install build-essential cmake libdrm-dev libfreetype-dev pkg-config
 cmake -B build
 cmake --build build
 ```
@@ -88,15 +88,23 @@ serial_linux.c --> vt100_feed --> vtparse.c (DEC/ANSI state machine)
 - `src/video/textmode.c` — **new**, not a port. Same `textmode.h` API as the
   Pico build (so `screen.c` didn't need to change), implemented against
   DRM/KMS: single dumb buffer, mode-set to whatever the connected monitor's
-  preferred resolution is, glyph blit scaled by the largest integer factor
-  that fits an 80x24 grid on that display.
+  preferred resolution is. The 80x24 grid is stretched to fill the whole
+  display (each cell's pixel rect derived from its row/col), and each cell
+  alpha-blends a glyph from the atlas below.
+- `src/video/glyphs.c` — **new**. Renders the 256 CP437 code points into an
+  anti-aliased coverage atlas at the display's cell size via FreeType, from a
+  bundled TrueType font (`assets/DejaVuSansMono.ttf`; override with
+  `FONT_TTF_PATH`). The block/shade/box-drawing region (0xB0-0xDF) is drawn
+  procedurally instead, edge-to-edge, so lines tile seamlessly across cells —
+  a normal mono font's line glyphs don't, once squeezed into 80-column cells.
 - `src/io/serial_linux.c/.h` — termios wrapper around `/dev/serial0`,
   replacing the Pico's UART-IRQ-plus-ring-buffer (the kernel tty driver
   already buffers RX).
 - `src/io/kbd_evdev.c/.h` — raw evdev keyboard reader (no libinput/X11/
   Wayland dependency), replacing the Pico's TinyUSB HID decode on core1.
   Same DECCKM-aware key -> VT100-escape logic, against Linux keycodes.
-- `src/video/font_8x16.h` — ported unmodified (glyph bitmap data).
+- `src/video/font_8x16.h` — ported unmodified (VGA bitmap glyph data); no
+  longer the render path (FreeType is), kept as a fallback / reference.
 
 Not ported / no equivalent (see [VT100-PI](../VT100-PI)'s `fault.c`,
 `hstx_dvi.c`, `kbd_host.c`'s core1 split, `net.c`'s CYW43 bring-up): a

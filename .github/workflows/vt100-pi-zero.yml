@@ -24,7 +24,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libdrm-dev pkg-config
+          sudo apt-get install -y build-essential cmake libdrm-dev libfreetype-dev pkg-config
 
       - name: Configure
         run: cmake -S VT100-PI-ZERO -B VT100-PI-ZERO/build

@@ -5,15 +5,7 @@
 // tearing on a fast scroll is an acceptable trade for a lot less code than a
 // double-buffered swap chain.
 #include "video/textmode.h"
-#include "video/font_vt220.h"
-
-// Source glyph geometry. font_vt220 is 12x24, 2 bytes/row big-endian with the
-// top 12 bits = pixels (bit 15 = leftmost). Named here so a font swap is a
-// one-line change plus the row-fetch in blit_glyph.
-#define GLYPH_W       FONTVT_W          // 12
-#define GLYPH_H       FONTVT_H          // 24
-#define GLYPH_BYTES   FONTVT_BYTES      // 48
-#define glyph_font    font_vt220
+#include "video/glyphs.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -181,22 +173,20 @@ static inline void put_px(int x, int y, uint32_t rgb) {
 static inline int cell_x0(int col) { return (int)((long)col * fb_width  / TERM_COLS); }
 static inline int cell_y0(int row) { return (int)((long)row * fb_height / TERM_ROWS); }
 
-// Blend fg over bg by an SS*SS-step coverage fraction (0 = all bg, SS*SS = all fg).
-#define SS 4   // supersampling grid per destination pixel (4x4 -> 17 blend levels)
-static inline uint32_t blend(uint32_t fg, uint32_t bg, int cov) {
-    int d = SS * SS;
-    int r = (((fg >> 16) & 0xff) * cov + ((bg >> 16) & 0xff) * (d - cov)) / d;
-    int g = (((fg >>  8) & 0xff) * cov + ((bg >>  8) & 0xff) * (d - cov)) / d;
-    int b = ((( fg      ) & 0xff) * cov + (( bg      ) & 0xff) * (d - cov)) / d;
+// Blend fg over bg by an 8-bit coverage/alpha (0 = all bg, 255 = all fg).
+static inline uint32_t blend(uint32_t fg, uint32_t bg, int a) {
+    int r = (((fg >> 16) & 0xff) * a + ((bg >> 16) & 0xff) * (255 - a)) / 255;
+    int g = (((fg >>  8) & 0xff) * a + ((bg >>  8) & 0xff) * (255 - a)) / 255;
+    int b = ((( fg      ) & 0xff) * a + (( bg      ) & 0xff) * (255 - a)) / 255;
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
-// Anti-aliased blit of one glyph into cell (row,col)'s pixel rect. Each
-// destination pixel is supersampled SS x SS times against the font bitmap and
-// the fg/bg colours blended by the coverage, so the non-integer upscale reads
-// as smooth VGA-style text rather than blocky nearest-neighbour stairsteps.
+// Blit one glyph into cell (row,col)'s pixel rect by sampling its anti-aliased
+// coverage atlas (rendered at ~cell size by glyphs.c) and alpha-blending fg/bg.
+// The atlas is already smooth, so a nearest sample into the cell rect is fine.
 static void blit_glyph(int row, int col, uint8_t glyph, uint32_t fg, uint32_t bg, uint8_t attr) {
-    const uint8_t *g = &glyph_font[(unsigned)glyph * GLYPH_BYTES];
+    const uint8_t *al = glyph_alpha(glyph);
+    int aw = glyph_atlas_w(), ah = glyph_atlas_h();
     int x0 = cell_x0(col), x1 = cell_x0(col + 1);
     int y0 = cell_y0(row), y1 = cell_y0(row + 1);
     int cw = x1 - x0, ch = y1 - y0;
@@ -204,19 +194,13 @@ static void blit_glyph(int row, int col, uint8_t glyph, uint32_t fg, uint32_t bg
     if (ch < 1) ch = 1;
     int ul = (attr & ATTR_UNDERLINE) ? 1 : 0;
     for (int y = y0; y < y1; ++y) {
+        int ay = (y - y0) * ah / ch;
+        int uline = ul && (ay >= ah - 2);
+        const uint8_t *arow = al + ay * aw;
         for (int x = x0; x < x1; ++x) {
-            int cov = 0;
-            for (int j = 0; j < SS; ++j) {
-                int fy = (((y - y0) * SS + j) * GLYPH_H) / (ch * SS);      // font row
-                // 2 bytes/row, big-endian; top GLYPH_W bits are the pixels.
-                unsigned bits = ((unsigned)g[fy * 2] << 8) | g[fy * 2 + 1];
-                int uline = ul && (fy == GLYPH_H - 3);
-                for (int i = 0; i < SS; ++i) {
-                    int fx = (((x - x0) * SS + i) * GLYPH_W) / (cw * SS);  // font col
-                    if (uline || ((bits >> (15 - fx)) & 1)) cov++;
-                }
-            }
-            put_px(x, y, cov == 0 ? bg : (cov == SS * SS ? fg : blend(fg, bg, cov)));
+            int ax = (x - x0) * aw / cw;
+            int a = uline ? 255 : arow[ax];
+            put_px(x, y, a == 0 ? bg : (a == 255 ? fg : blend(fg, bg, a)));
         }
     }
 }
@@ -239,7 +223,7 @@ static void draw_cell(int row, int col, int cursor) {
         blit_glyph(row, col, glyph, palette_rgb(fgi), palette_rgb(bgi), c.attr);
         int x0 = cell_x0(col), x1 = cell_x0(col + 1);
         int y1 = cell_y0(row + 1);
-        int bar = (y1 - cell_y0(row)) * 2 / GLYPH_H;
+        int bar = (y1 - cell_y0(row)) / 12;
         if (bar < 1) bar = 1;
         for (int y = y1 - bar; y < y1; ++y)
             for (int x = x0; x < x1; ++x)
@@ -253,8 +237,13 @@ static void draw_cell(int row, int col, int cursor) {
 void textmode_init(void) {
     open_display();
 
-    // No cell-size setup needed: the grid is stretched to fill the whole
-    // display (see cell_x0/cell_y0 and blit_glyph). Just clear and paint.
+    // Render the glyph atlas at the display's cell size (rounded up so it
+    // covers the widest column). The grid itself is stretched to fill the whole
+    // display; blit_glyph samples the atlas into each cell's exact pixel rect.
+    int cell_w = ((int)fb_width  + TERM_COLS - 1) / TERM_COLS;
+    int cell_h = ((int)fb_height + TERM_ROWS - 1) / TERM_ROWS;
+    glyphs_init(cell_w, cell_h);
+
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
             tm_cells[r][c] = (cell_t){ ' ', 7, 0, 0 };

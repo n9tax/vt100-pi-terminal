@@ -11,6 +11,7 @@ endif()
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(DRM REQUIRED libdrm)
+pkg_check_modules(FREETYPE REQUIRED freetype2)
 
 add_executable(vt100-pi-zero
         src/main.c
@@ -18,6 +19,7 @@ add_executable(vt100-pi-zero
         src/terminal/screen.c
         src/terminal/vt100.c
         src/video/textmode.c
+        src/video/glyphs.c
         src/io/serial_linux.c
         src/io/kbd_evdev.c
         src/io/host_link.c
@@ -26,7 +28,13 @@ add_executable(vt100-pi-zero
 target_include_directories(vt100-pi-zero PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/src
         ${DRM_INCLUDE_DIRS}
+        ${FREETYPE_INCLUDE_DIRS}
         )
-target_compile_options(vt100-pi-zero PRIVATE -Wall -Wextra ${DRM_CFLAGS_OTHER})
-target_link_libraries(vt100-pi-zero PRIVATE ${DRM_LIBRARIES})
-target_link_directories(vt100-pi-zero PRIVATE ${DRM_LIBRARY_DIRS})
+target_compile_options(vt100-pi-zero PRIVATE -Wall -Wextra ${DRM_CFLAGS_OTHER} ${FREETYPE_CFLAGS_OTHER})
+target_link_libraries(vt100-pi-zero PRIVATE ${DRM_LIBRARIES} ${FREETYPE_LIBRARIES})
+target_link_directories(vt100-pi-zero PRIVATE ${DRM_LIBRARY_DIRS} ${FREETYPE_LIBRARY_DIRS})
+
+# Compile-in the path to the bundled TTF so the binary finds it when run from
+# the build tree; glyphs.c also falls back to FONT_TTF_PATH and system fonts.
+target_compile_definitions(vt100-pi-zero PRIVATE
+        ASSET_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/assets/DejaVuSansMono.ttf")

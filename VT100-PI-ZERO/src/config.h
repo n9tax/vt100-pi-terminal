@@ -35,6 +35,12 @@
 #define THEME_COUNT   7
 #define THEME_DEFAULT THEME_AMBER
 
+// ---- Font -----------------------------------------------------------------
+// TrueType font rendered (anti-aliased) into the glyph atlas. Leave empty to
+// use the bundled DejaVuSansMono.ttf (or a system DejaVu); set an absolute path
+// to override (e.g. a Glass TTY VT220 TTF for a more authentic DEC look).
+#define FONT_TTF_PATH ""
+
 // Echo locally typed keys to the screen as well as sending them to the host.
 // A real terminal leaves this OFF (the host echoes).
 #define LOCAL_ECHO 0
