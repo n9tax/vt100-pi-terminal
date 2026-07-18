@@ -35,33 +35,96 @@ int kbd_getc(void) {
 }
 
 // ---- device discovery ------------------------------------------------------
-static int looks_like_keyboard(int cand_fd) {
-    unsigned long bits[KEY_MAX / (8 * sizeof(long)) + 1];
-    memset(bits, 0, sizeof bits);
-    if (ioctl(cand_fd, EVIOCGBIT(EV_KEY, sizeof bits), bits) < 0) return 0;
-    return (bits[KEY_A / (8 * sizeof(long))] >> (KEY_A % (8 * sizeof(long)))) & 1;
+static int has_bit(const unsigned long *bits, unsigned n) {
+    return (bits[n / (8 * sizeof(long))] >> (n % (8 * sizeof(long)))) & 1;
 }
 
-void kbd_init(void) {
+// A real typing keyboard advertises letters plus Enter and Space, and is NOT a
+// pointer: a composite USB keyboard exposes a second "consumer control"
+// interface (see the Keychron K8's event1) that carries relative axes (EV_REL)
+// and a broad key bitmap but never delivers ordinary typing. Grabbing that
+// interface looks exactly like the program hanging on the boot splash, so we
+// reject anything advertising EV_REL here.
+static int looks_like_keyboard(int cand_fd) {
+    unsigned long evbits[EV_MAX / (8 * sizeof(long)) + 1];
+    unsigned long keybits[KEY_MAX / (8 * sizeof(long)) + 1];
+    memset(evbits, 0, sizeof evbits);
+    memset(keybits, 0, sizeof keybits);
+    if (ioctl(cand_fd, EVIOCGBIT(0, sizeof evbits), evbits) < 0) return 0;
+    if (has_bit(evbits, EV_REL)) return 0;   // pointer-like interface, not it
+    if (ioctl(cand_fd, EVIOCGBIT(EV_KEY, sizeof keybits), keybits) < 0) return 0;
+    return has_bit(keybits, KEY_A) && has_bit(keybits, KEY_ENTER) &&
+           has_bit(keybits, KEY_SPACE);
+}
+
+static void report_device(int the_fd, const char *path) {
+    char name[256] = "?";
+    ioctl(the_fd, EVIOCGNAME(sizeof name), name);
+    fprintf(stderr, "kbd: using %s (%s)\n", path, name);
+}
+
+// udev names the real typing interface /dev/input/by-id/*-event-kbd (the other
+// interfaces of a composite keyboard get *-event-if01 etc.). Trust that suffix:
+// it is exactly the node the naive event-scan could miss. Returns an open fd
+// and fills `chosen`, or -1 if by-id is absent / unpopulated.
+static int open_by_id(char *chosen, size_t chosen_sz) {
+    DIR *d = opendir("/dev/input/by-id");
+    if (!d) return -1;
+
+    const char *suffix = "-event-kbd";
+    const size_t slen = strlen(suffix);
+    struct dirent *ent;
+    char path[512];
+    int result = -1;
+    while ((ent = readdir(d)) != NULL) {
+        size_t len = strlen(ent->d_name);
+        if (len < slen || strcmp(ent->d_name + len - slen, suffix) != 0) continue;
+        snprintf(path, sizeof path, "/dev/input/by-id/%s", ent->d_name);
+        int cfd = open(path, O_RDONLY | O_NONBLOCK);
+        if (cfd < 0) continue;
+        result = cfd;
+        snprintf(chosen, chosen_sz, "%s", path);
+        break;
+    }
+    closedir(d);
+    return result;
+}
+
+// Fallback for systems without populated by-id symlinks: scan /dev/input/event*
+// and take the first node that passes the (stricter) keyboard test above.
+static int open_by_scan(char *chosen, size_t chosen_sz) {
     DIR *d = opendir("/dev/input");
     if (!d) { fprintf(stderr, "kbd: opendir(/dev/input) failed\n"); exit(1); }
 
     struct dirent *ent;
-    char path[300];
+    char path[512];
+    int result = -1;
     while ((ent = readdir(d)) != NULL) {
         if (strncmp(ent->d_name, "event", 5) != 0) continue;
         snprintf(path, sizeof path, "/dev/input/%s", ent->d_name);
         int cfd = open(path, O_RDONLY | O_NONBLOCK);
         if (cfd < 0) continue;
-        if (looks_like_keyboard(cfd)) { fd = cfd; break; }
+        if (looks_like_keyboard(cfd)) {
+            result = cfd;
+            snprintf(chosen, chosen_sz, "%s", path);
+            break;
+        }
         close(cfd);
     }
     closedir(d);
+    return result;
+}
+
+void kbd_init(void) {
+    char chosen[512] = "";
+    fd = open_by_id(chosen, sizeof chosen);   // canonical node first
+    if (fd < 0) fd = open_by_scan(chosen, sizeof chosen);
 
     if (fd < 0) {
         fprintf(stderr, "kbd: no keyboard found under /dev/input\n");
         exit(1);
     }
+    report_device(fd, chosen);
 }
 
 int kbd_fd(void) { return fd; }
