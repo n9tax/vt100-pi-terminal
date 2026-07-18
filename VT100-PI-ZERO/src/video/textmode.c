@@ -5,7 +5,15 @@
 // tearing on a fast scroll is an acceptable trade for a lot less code than a
 // double-buffered swap chain.
 #include "video/textmode.h"
-#include "video/font_8x16.h"
+#include "video/font_vt220.h"
+
+// Source glyph geometry. font_vt220 is 12x24, 2 bytes/row big-endian with the
+// top 12 bits = pixels (bit 15 = leftmost). Named here so a font swap is a
+// one-line change plus the row-fetch in blit_glyph.
+#define GLYPH_W       FONTVT_W          // 12
+#define GLYPH_H       FONTVT_H          // 24
+#define GLYPH_BYTES   FONTVT_BYTES      // 48
+#define glyph_font    font_vt220
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -183,12 +191,12 @@ static inline uint32_t blend(uint32_t fg, uint32_t bg, int cov) {
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
-// Anti-aliased blit of one 8x16 glyph into cell (row,col)'s pixel rect. Each
+// Anti-aliased blit of one glyph into cell (row,col)'s pixel rect. Each
 // destination pixel is supersampled SS x SS times against the font bitmap and
 // the fg/bg colours blended by the coverage, so the non-integer upscale reads
 // as smooth VGA-style text rather than blocky nearest-neighbour stairsteps.
 static void blit_glyph(int row, int col, uint8_t glyph, uint32_t fg, uint32_t bg, uint8_t attr) {
-    const uint8_t *rows = &font_8x16[(unsigned)glyph * FONT_H];
+    const uint8_t *g = &glyph_font[(unsigned)glyph * GLYPH_BYTES];
     int x0 = cell_x0(col), x1 = cell_x0(col + 1);
     int y0 = cell_y0(row), y1 = cell_y0(row + 1);
     int cw = x1 - x0, ch = y1 - y0;
@@ -199,12 +207,13 @@ static void blit_glyph(int row, int col, uint8_t glyph, uint32_t fg, uint32_t bg
         for (int x = x0; x < x1; ++x) {
             int cov = 0;
             for (int j = 0; j < SS; ++j) {
-                int fy = (((y - y0) * SS + j) * FONT_H) / (ch * SS);   // font row 0..FONT_H-1
-                uint8_t bits = rows[fy];
-                int uline = ul && (fy == FONT_H - 2);
+                int fy = (((y - y0) * SS + j) * GLYPH_H) / (ch * SS);      // font row
+                // 2 bytes/row, big-endian; top GLYPH_W bits are the pixels.
+                unsigned bits = ((unsigned)g[fy * 2] << 8) | g[fy * 2 + 1];
+                int uline = ul && (fy == GLYPH_H - 3);
                 for (int i = 0; i < SS; ++i) {
-                    int fx = (((x - x0) * SS + i) * 8) / (cw * SS);     // font col 0..7
-                    if (uline || ((bits >> (7 - fx)) & 1)) cov++;
+                    int fx = (((x - x0) * SS + i) * GLYPH_W) / (cw * SS);  // font col
+                    if (uline || ((bits >> (15 - fx)) & 1)) cov++;
                 }
             }
             put_px(x, y, cov == 0 ? bg : (cov == SS * SS ? fg : blend(fg, bg, cov)));
@@ -230,7 +239,7 @@ static void draw_cell(int row, int col, int cursor) {
         blit_glyph(row, col, glyph, palette_rgb(fgi), palette_rgb(bgi), c.attr);
         int x0 = cell_x0(col), x1 = cell_x0(col + 1);
         int y1 = cell_y0(row + 1);
-        int bar = (y1 - cell_y0(row)) * 2 / FONT_H;
+        int bar = (y1 - cell_y0(row)) * 2 / GLYPH_H;
         if (bar < 1) bar = 1;
         for (int y = y1 - bar; y < y1; ++y)
             for (int x = x0; x < x1; ++x)
