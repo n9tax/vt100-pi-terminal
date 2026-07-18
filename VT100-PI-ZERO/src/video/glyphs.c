@@ -170,10 +170,18 @@ void glyphs_init(int cell_w, int cell_h) {
     }
     fprintf(stderr, "glyphs: font %s, atlas %dx%d\n", path, aw, ah);
 
-    // Render at the cell's pixel size. Setting width and height independently
-    // squeezes each glyph to the cell aspect (~13x32 here), which is what lets
-    // 80 columns fill a 1024-wide display without clipping.
-    FT_Set_Pixel_Sizes(face, (FT_UInt)aw, (FT_UInt)ah);
+    // Fill the cell height with the font, and pick a pixel *width* so the glyph
+    // advance fills the cell too. Setting width = aw directly makes glyphs ~40%
+    // too narrow, because a monospace advance is only ~0.6 em -- so measure the
+    // natural advance at a square size and scale the em width up to match aw.
+    FT_Set_Pixel_Sizes(face, (FT_UInt)ah, (FT_UInt)ah);
+    int adv_nat = ah;
+    FT_UInt ref = FT_Get_Char_Index(face, 'M');
+    if (ref && FT_Load_Glyph(face, ref, FT_LOAD_DEFAULT) == 0)
+        adv_nat = (int)(face->glyph->advance.x >> 6);
+    int em_w = (adv_nat > 0) ? (ah * aw / adv_nat) : aw;
+    if (em_w < 1) em_w = 1;
+    FT_Set_Pixel_Sizes(face, (FT_UInt)em_w, (FT_UInt)ah);
 
     int baseline = (int)(face->size->metrics.ascender >> 6);
     int line_h   = (int)(face->size->metrics.height >> 6);
