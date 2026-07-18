@@ -157,3 +157,44 @@ void settings_load(void) {
 }
 
 const char *settings_path(void) { return cfg_path; }
+
+const char *settings_theme_name(int theme) {
+    switch (theme) {
+        case THEME_COLOR:  return "color";
+        case THEME_GREEN:  return "green";
+        case THEME_WHITE:  return "white";
+        case THEME_BLUE:   return "blue";
+        case THEME_RED:    return "red";
+        case THEME_YELLOW: return "yellow";
+        case THEME_AMBER:  default: return "amber";
+    }
+}
+
+void settings_save(void) {
+    ensure_dir();
+    FILE *f = fopen(cfg_path, "w");
+    if (!f) { fprintf(stderr, "settings: cannot write %s: %s\n", cfg_path, strerror(errno)); return; }
+    fprintf(f,
+        "# VT100-PI-ZERO settings. Edit, then restart the program\n"
+        "# (sudo systemctl restart vt100-pi, or rerun the binary),\n"
+        "# or use the on-screen Setup menu (Ctrl+F3).\n"
+        "# Syntax: key = value   (# starts a comment)\n"
+        "\n"
+        "# ---- Serial host link ----\n"
+        "serial_dev = %s\n"
+        "baud       = %d   # 300 1200 2400 4800 9600 19200 38400 57600 115200\n"
+        "\n"
+        "# ---- Display ----\n"
+        "theme      = %s      # color amber green white blue red yellow\n"
+        "cursor     = %s      # block | underline\n"
+        "local_echo = %s        # on | off\n"
+        "\n"
+        "# ---- Font ----\n"
+        "# empty = bundled DejaVu Sans Mono (or a system DejaVu); or an absolute .ttf path.\n"
+        "font       = %s\n",
+        g_settings.serial_dev, g_settings.baud, settings_theme_name(g_settings.theme),
+        g_settings.cursor_style ? "underline" : "block",
+        g_settings.local_echo ? "on" : "off", g_settings.font_path);
+    fclose(f);
+    fprintf(stderr, "settings: saved %s\n", cfg_path);
+}

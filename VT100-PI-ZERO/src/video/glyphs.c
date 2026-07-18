@@ -151,6 +151,7 @@ static const char *find_font(void) {
 void glyphs_init(int cell_w, int cell_h) {
     aw = cell_w > 0 ? cell_w : 1;
     ah = cell_h > 0 ? cell_h : 1;
+    free(atlas);   // allow re-init (font change from the Setup menu)
     atlas = calloc((size_t)GLYPH_COUNT * aw * ah, 1);
     if (!atlas) { fprintf(stderr, "glyphs: out of memory for atlas\n"); exit(1); }
 

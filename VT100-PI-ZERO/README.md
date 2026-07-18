@@ -64,8 +64,14 @@ font       =             # empty = bundled DejaVu Sans Mono, or an absolute .ttf
 ```
 
 Unknown keys are ignored (with a warning on stderr); a missing file is
-recreated with defaults. This is the data model the on-screen Setup menu
-(below) will edit once it lands.
+recreated with defaults.
+
+Or edit it on screen: **Ctrl+F3** opens the Setup menu. Up/Down move between
+fields, Left/Right change a value (baud, theme, cursor, echo), typing edits the
+text fields (serial device, font) with Backspace to delete, **Enter** saves and
+applies, **Ctrl+F3** again cancels. Theme/cursor/echo apply instantly; a changed
+serial device/baud reopens the link and a changed font rebuilds the glyph atlas
+live — no restart.
 
 ## Boot straight into the terminal (kiosk mode)
 
@@ -141,10 +147,9 @@ stack.
    callbacks), then SSH via `posix_openpty` + `fork`/`exec ssh` so the
    system's own OpenSSH client does the protocol work; the PTY master fd
    then feeds `vt100_feed()` exactly like the serial/telnet paths do.
-3. **Setup menu + settings persistence**: settings persistence is **done** —
-   `src/settings.c` loads `~/.config/vt100-pi/vt100.conf` (see Configuration).
-   Still to do: the on-screen `setup.c` field-editing menu (Ctrl+F3) that edits
-   and re-saves that file live.
+3. **Setup menu + settings persistence**: **done** — `src/settings.c` loads
+   `~/.config/vt100-pi/vt100.conf`, and `src/setup.c` is the on-screen Ctrl+F3
+   menu that edits, applies, and re-saves it live (see Configuration).
 4. **Boot integration** (systemd unit is already checked in; verify a cold
    boot end-to-end once phases 2-3 land).
 

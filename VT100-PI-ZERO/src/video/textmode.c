@@ -250,6 +250,13 @@ void textmode_init(void) {
     textmode_render_all();
 }
 
+void textmode_reload_font(void) {
+    int cell_w = ((int)fb_width  + TERM_COLS - 1) / TERM_COLS;
+    int cell_h = ((int)fb_height + TERM_ROWS - 1) / TERM_ROWS;
+    glyphs_init(cell_w, cell_h);   // re-renders atlas from g_settings.font_path
+    textmode_render_all();
+}
+
 void textmode_render_cell(int row, int col) { draw_cell(row, col, 0); }
 void textmode_render_cursor(int row, int col) { draw_cell(row, col, 1); }
 

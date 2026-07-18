@@ -12,6 +12,7 @@
 
 static int fd = -1;
 static int shift_down, ctrl_down, alt_down, caps_lock;
+static int setup_toggle_flag;   // set on Ctrl+F3, consumed by the main loop
 
 // Small output ring; a human typing (or even pasting) can't outrun this
 // between poll() iterations.
@@ -129,11 +130,16 @@ void kbd_init(void) {
 
 int kbd_fd(void) { return fd; }
 
+int kbd_take_setup_toggle(void) {
+    int t = setup_toggle_flag;
+    setup_toggle_flag = 0;
+    return t;
+}
+
 // ---- Linux keycode -> VT100 byte sequence (US layout) ---------------------
 static void emit_key(unsigned code) {
     // Ctrl+F3 opens/closes the local Setup screen; never sent to the host.
-    // (Setup itself lands in a later phase; for now this is simply absorbed.)
-    if (ctrl_down && code == KEY_F3) return;
+    if (ctrl_down && code == KEY_F3) { setup_toggle_flag = 1; return; }
 
     switch (code) {
         case KEY_A: case KEY_B: case KEY_C: case KEY_D: case KEY_E: case KEY_F:

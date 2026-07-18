@@ -81,3 +81,17 @@ void serial_write(const uint8_t *buf, uint32_t len) {
 }
 
 void serial_set_baud(int baud) { apply_termios(baud); }
+
+int serial_reconfigure(const char *path, int baud) {
+    // Open the new device before dropping the old one, so a bad path from the
+    // Setup menu leaves the existing link intact rather than killing serial.
+    int nf = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
+    if (nf < 0) {
+        fprintf(stderr, "serial: reconfigure open(%s) failed: %s\n", path, strerror(errno));
+        return -1;
+    }
+    if (fd >= 0) close(fd);
+    fd = nf;
+    apply_termios(baud);
+    return 0;
+}

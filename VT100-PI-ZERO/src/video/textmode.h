@@ -31,6 +31,10 @@ extern cell_t tm_cells[TERM_ROWS][TERM_COLS];
 // (there is no meaningful fallback for a terminal with no display).
 void textmode_init(void);
 
+// Rebuild the glyph atlas from the current font (g_settings.font_path) and
+// repaint. Used by the Setup menu when the font changes.
+void textmode_reload_font(void);
+
 // Blit one cell (or the whole grid) from tm_cells into the framebuffer.
 void textmode_render_cell(int row, int col);
 void textmode_render_all(void);

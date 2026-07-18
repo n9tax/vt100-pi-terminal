@@ -24,4 +24,10 @@ void settings_load(void);
 // Absolute path of the active config file (for logging / the Setup menu).
 const char *settings_path(void);
 
+// Write g_settings back to the config file (used by the Setup menu on save).
+void settings_save(void);
+
+// Name of a THEME_* value ("amber", "green", ...); "amber" if out of range.
+const char *settings_theme_name(int theme);
+
 #endif // SETTINGS_H

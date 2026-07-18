@@ -12,6 +12,7 @@
 
 #include "config.h"
 #include "settings.h"
+#include "setup.h"
 #include "video/textmode.h"
 #include "io/serial_linux.h"
 #include "io/kbd_evdev.h"
@@ -74,10 +75,14 @@ int main(void) {
     pfds[1].fd = kbd_fd();    pfds[1].events = POLLIN;
 
     while (1) {
+        pfds[0].fd = serial_fd();   // may change if serial was reopened in Setup
+
         // 50ms tick keeps the blink/bell timers responsive even with no I/O.
         poll(pfds, 2, 50);
 
         if (pfds[1].revents & POLLIN) kbd_poll();
+
+        if (!booting && kbd_take_setup_toggle()) setup_toggle();
 
         if (booting) {
             // Boot self-test splash: hold until RETURN, then open a clean terminal.
@@ -89,6 +94,10 @@ int main(void) {
                     break;
                 }
             }
+        } else if (setup_active()) {
+            // Setup owns the screen: route keys to the menu, pause the host link.
+            int k;
+            while ((k = kbd_getc()) >= 0) setup_feed((uint8_t)k);
         } else {
             int activity = 0;
 
@@ -118,6 +127,8 @@ int main(void) {
                 flash_until = now_ms() + 60;
             }
         }
+
+        if (setup_active()) continue;   // don't blink/flash over the menu
 
         long long t = now_ms();
         if (flash_until >= 0 && t >= flash_until) {

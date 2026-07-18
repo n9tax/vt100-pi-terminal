@@ -24,4 +24,10 @@ void serial_write(const uint8_t *buf, uint32_t len);
 // speeds: 300..115200).
 void serial_set_baud(int baud);
 
+// Switch to a different device and/or baud at runtime (from the Setup menu).
+// Opens the new device first and only then closes the old one, so a bad path
+// leaves the current link untouched. Returns 0 on success, -1 on failure.
+// NOTE: serial_fd() changes on success — refresh any stored poll fd.
+int serial_reconfigure(const char *path, int baud);
+
 #endif // SERIAL_LINUX_H

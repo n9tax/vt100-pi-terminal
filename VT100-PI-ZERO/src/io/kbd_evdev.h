@@ -23,4 +23,8 @@ void kbd_poll(void);
 // Pop one decoded byte; -1 if the queue is empty.
 int kbd_getc(void);
 
+// Returns 1 (once) if Ctrl+F3 was pressed since the last call, else 0. The main
+// loop uses this to open/close the Setup screen. Ctrl+F3 is never sent to host.
+int kbd_take_setup_toggle(void);
+
 #endif // KBD_EVDEV_H
