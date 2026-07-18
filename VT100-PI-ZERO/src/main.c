@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "config.h"
+#include "settings.h"
 #include "video/textmode.h"
 #include "io/serial_linux.h"
 #include "io/kbd_evdev.h"
@@ -50,8 +51,12 @@ static long long now_ms(void) {
 }
 
 int main(void) {
-    textmode_init();
-    serial_init(SERIAL_DEV, SERIAL_BAUD);
+    settings_load();                        // ~/.config/vt100-pi/vt100.conf -> g_settings
+
+    textmode_init();                        // reads g_settings.font_path via glyphs.c
+    textmode_set_theme(g_settings.theme);
+    textmode_set_cursor_style(g_settings.cursor_style);
+    serial_init(g_settings.serial_dev, g_settings.baud);
     kbd_init();
     screen_init();
     vt100_init();
@@ -98,7 +103,7 @@ int main(void) {
             uint8_t kb[64]; int kn = 0, k;
             while ((k = kbd_getc()) >= 0) {
                 if (kn < (int)sizeof kb) kb[kn++] = (uint8_t)k;
-                if (LOCAL_ECHO) {
+                if (g_settings.local_echo) {
                     if (!activity) { screen_hide_cursor(); activity = 1; }
                     vt100_feed((uint8_t)k);
                     if (k == '\r') vt100_feed('\n');

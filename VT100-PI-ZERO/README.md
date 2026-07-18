@@ -47,6 +47,26 @@ sudo ./build/vt100-pi-zero
 (`raspi-config` -> Interface Options -> Serial Port -> login shell: No,
 hardware enabled: Yes), or the two will fight over the UART.
 
+## Configuration
+
+On first run the program writes a documented settings file to
+`~/.config/vt100-pi/vt100.conf` (compile-time defaults in `src/config.h`).
+Edit it and restart to change the serial device/baud, colour/phosphor theme,
+cursor style, local echo, or the font — no rebuild:
+
+```
+serial_dev = /dev/serial0
+baud       = 9600        # 300 1200 2400 4800 9600 19200 38400 57600 115200
+theme      = amber       # color amber green white blue red yellow
+cursor     = block       # block | underline
+local_echo = off         # on | off
+font       =             # empty = bundled DejaVu Sans Mono, or an absolute .ttf path
+```
+
+Unknown keys are ignored (with a warning on stderr); a missing file is
+recreated with defaults. This is the data model the on-screen Setup menu
+(below) will edit once it lands.
+
 ## Boot straight into the terminal (kiosk mode)
 
 ```
@@ -121,9 +141,10 @@ stack.
    callbacks), then SSH via `posix_openpty` + `fork`/`exec ssh` so the
    system's own OpenSSH client does the protocol work; the PTY master fd
    then feeds `vt100_feed()` exactly like the serial/telnet paths do.
-3. **Setup menu + settings persistence**: port `setup.c`'s field-editing
-   model and `settings.c`'s struct shape from VT100-PI, file-backed under
-   `~/.config/vt100-pi/` instead of a flash sector.
+3. **Setup menu + settings persistence**: settings persistence is **done** —
+   `src/settings.c` loads `~/.config/vt100-pi/vt100.conf` (see Configuration).
+   Still to do: the on-screen `setup.c` field-editing menu (Ctrl+F3) that edits
+   and re-saves that file live.
 4. **Boot integration** (systemd unit is already checked in; verify a cold
    boot end-to-end once phases 2-3 land).
 

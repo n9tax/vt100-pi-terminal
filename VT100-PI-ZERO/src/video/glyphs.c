@@ -3,6 +3,7 @@
 // fill the width) and vertically centred on the font's baseline.
 #include "video/glyphs.h"
 #include "config.h"
+#include "settings.h"
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -131,8 +132,9 @@ static int render_special(int code, uint8_t *cell) {
 // ---- font discovery --------------------------------------------------------
 static const char *find_font(void) {
     static const char *cands[] = {
-        FONT_TTF_PATH,   // user override (config.h), "" if unset
-        ASSET_FONT_PATH, // bundled DejaVuSansMono.ttf (compiled-in source path)
+        g_settings.font_path,  // runtime override (settings file), "" if unset
+        FONT_TTF_PATH,         // compile-time override (config.h), "" if unset
+        ASSET_FONT_PATH,       // bundled DejaVuSansMono.ttf (compiled-in source path)
         "/usr/local/share/vt100-pi/font.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
