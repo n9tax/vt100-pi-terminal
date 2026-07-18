@@ -26,9 +26,11 @@ static uint32_t crtc_id, connector_id, fb_id, dumb_handle;
 static uint8_t *fb_mem;
 static uint32_t fb_pitch, fb_width, fb_height;
 
-static int cell_scale = 1;          // integer upscale of the 8x16 glyph cell
-static int cell_w, cell_h;          // on-screen cell size (8*scale x 16*scale)
-static int text_x0, text_y0;        // top-left of the centred TERM_COLS x TERM_ROWS grid
+// No fixed cell size: the TERM_COLS x TERM_ROWS grid is stretched to fill the
+// entire display. Each cell's pixel rectangle is derived from its row/col (see
+// cell_x0/cell_y0), so the grid always spans the whole framebuffer with no
+// border. Fractional pixels are spread across cells, so adjacent columns/rows
+// differ by at most 1px, and the 8x16 font is nearest-neighbour scaled in.
 
 static int cur_theme = THEME_DEFAULT;
 static int cursor_style = 0;        // 0 = block, 1 = underline
@@ -165,17 +167,28 @@ static inline void put_px(int x, int y, uint32_t rgb) {
     *(uint32_t *)(fb_mem + (uint32_t)y * fb_pitch + (uint32_t)x * 4) = rgb;
 }
 
-static void blit_glyph(int px, int py, uint8_t glyph, uint32_t fg, uint32_t bg, uint8_t attr) {
+// Pixel bounds of a cell. The grid is stretched across the whole framebuffer,
+// so these map the integer grid coordinate onto the display; cell (row,col)
+// spans x in [cell_x0(col), cell_x0(col+1)) and y in [cell_y0(row), cell_y0(row+1)).
+static inline int cell_x0(int col) { return (int)((long)col * fb_width  / TERM_COLS); }
+static inline int cell_y0(int row) { return (int)((long)row * fb_height / TERM_ROWS); }
+
+// Nearest-neighbour blit of one 8x16 glyph into cell (row,col)'s pixel rect,
+// stretched to whatever size that rect works out to on this display.
+static void blit_glyph(int row, int col, uint8_t glyph, uint32_t fg, uint32_t bg, uint8_t attr) {
     const uint8_t *rows = &font_8x16[(unsigned)glyph * FONT_H];
-    for (int gy = 0; gy < FONT_H; ++gy) {
+    int x0 = cell_x0(col), x1 = cell_x0(col + 1);
+    int y0 = cell_y0(row), y1 = cell_y0(row + 1);
+    int cw = x1 - x0, ch = y1 - y0;
+    if (cw < 1) cw = 1;
+    if (ch < 1) ch = 1;
+    for (int y = y0; y < y1; ++y) {
+        int gy = (y - y0) * FONT_H / ch;                  // font row for this scanline
         uint8_t bits = rows[gy];
         int underline = (attr & ATTR_UNDERLINE) && gy == FONT_H - 2;
-        for (int gx = 0; gx < 8; ++gx) {
-            int on = underline || ((bits >> (7 - gx)) & 1);
-            uint32_t rgb = on ? fg : bg;
-            for (int sy = 0; sy < cell_scale; ++sy)
-                for (int sx = 0; sx < cell_scale; ++sx)
-                    put_px(px + gx * cell_scale + sx, py + gy * cell_scale + sy, rgb);
+        for (int x = x0; x < x1; ++x) {
+            int gx = (x - x0) * 8 / cw;                    // font column for this pixel
+            put_px(x, y, (underline || ((bits >> (7 - gx)) & 1)) ? fg : bg);
         }
     }
 }
@@ -193,34 +206,27 @@ static void draw_cell(int row, int col, int cursor) {
     uint32_t bg = palette_rgb(bgi);
 
     if (cursor && cursor_style == 1) {
-        // Underline cursor: draw the glyph normally, then an underline bar.
-        blit_glyph(text_x0 + col * cell_w, text_y0 + row * cell_h, glyph,
-                   palette_rgb(fgi), palette_rgb(bgi), c.attr);
-        for (int sy = 0; sy < cell_scale * 2; ++sy)
-            for (int gx = 0; gx < 8 * cell_scale; ++gx)
-                put_px(text_x0 + col * cell_w + gx,
-                       text_y0 + row * cell_h + cell_h - 1 - sy,
-                       palette_rgb(fgi));
+        // Underline cursor: draw the glyph normally, then an underline bar
+        // ~2 font rows thick, scaled to this cell's height.
+        blit_glyph(row, col, glyph, palette_rgb(fgi), palette_rgb(bgi), c.attr);
+        int x0 = cell_x0(col), x1 = cell_x0(col + 1);
+        int y1 = cell_y0(row + 1);
+        int bar = (y1 - cell_y0(row)) * 2 / FONT_H;
+        if (bar < 1) bar = 1;
+        for (int y = y1 - bar; y < y1; ++y)
+            for (int x = x0; x < x1; ++x)
+                put_px(x, y, palette_rgb(fgi));
         return;
     }
-    blit_glyph(text_x0 + col * cell_w, text_y0 + row * cell_h, glyph, fg, bg, c.attr);
+    blit_glyph(row, col, glyph, fg, bg, c.attr);
 }
 
 // ---- public API --------------------------------------------------------
 void textmode_init(void) {
     open_display();
 
-    // Largest integer scale of the 8x16 glyph cell that still fits the grid
-    // on this display, minimum 1x.
-    int max_w = (int)fb_width / (TERM_COLS * 8);
-    int max_h = (int)fb_height / (TERM_ROWS * FONT_H);
-    cell_scale = max_w < max_h ? max_w : max_h;
-    if (cell_scale < 1) cell_scale = 1;
-    cell_w = 8 * cell_scale;
-    cell_h = FONT_H * cell_scale;
-    text_x0 = ((int)fb_width - TERM_COLS * cell_w) / 2;
-    text_y0 = ((int)fb_height - TERM_ROWS * cell_h) / 2;
-
+    // No cell-size setup needed: the grid is stretched to fill the whole
+    // display (see cell_x0/cell_y0 and blit_glyph). Just clear and paint.
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
             tm_cells[r][c] = (cell_t){ ' ', 7, 0, 0 };
