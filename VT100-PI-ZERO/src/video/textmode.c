@@ -173,8 +173,20 @@ static inline void put_px(int x, int y, uint32_t rgb) {
 static inline int cell_x0(int col) { return (int)((long)col * fb_width  / TERM_COLS); }
 static inline int cell_y0(int row) { return (int)((long)row * fb_height / TERM_ROWS); }
 
-// Nearest-neighbour blit of one 8x16 glyph into cell (row,col)'s pixel rect,
-// stretched to whatever size that rect works out to on this display.
+// Blend fg over bg by an SS*SS-step coverage fraction (0 = all bg, SS*SS = all fg).
+#define SS 4   // supersampling grid per destination pixel (4x4 -> 17 blend levels)
+static inline uint32_t blend(uint32_t fg, uint32_t bg, int cov) {
+    int d = SS * SS;
+    int r = (((fg >> 16) & 0xff) * cov + ((bg >> 16) & 0xff) * (d - cov)) / d;
+    int g = (((fg >>  8) & 0xff) * cov + ((bg >>  8) & 0xff) * (d - cov)) / d;
+    int b = ((( fg      ) & 0xff) * cov + (( bg      ) & 0xff) * (d - cov)) / d;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+// Anti-aliased blit of one 8x16 glyph into cell (row,col)'s pixel rect. Each
+// destination pixel is supersampled SS x SS times against the font bitmap and
+// the fg/bg colours blended by the coverage, so the non-integer upscale reads
+// as smooth VGA-style text rather than blocky nearest-neighbour stairsteps.
 static void blit_glyph(int row, int col, uint8_t glyph, uint32_t fg, uint32_t bg, uint8_t attr) {
     const uint8_t *rows = &font_8x16[(unsigned)glyph * FONT_H];
     int x0 = cell_x0(col), x1 = cell_x0(col + 1);
@@ -182,13 +194,20 @@ static void blit_glyph(int row, int col, uint8_t glyph, uint32_t fg, uint32_t bg
     int cw = x1 - x0, ch = y1 - y0;
     if (cw < 1) cw = 1;
     if (ch < 1) ch = 1;
+    int ul = (attr & ATTR_UNDERLINE) ? 1 : 0;
     for (int y = y0; y < y1; ++y) {
-        int gy = (y - y0) * FONT_H / ch;                  // font row for this scanline
-        uint8_t bits = rows[gy];
-        int underline = (attr & ATTR_UNDERLINE) && gy == FONT_H - 2;
         for (int x = x0; x < x1; ++x) {
-            int gx = (x - x0) * 8 / cw;                    // font column for this pixel
-            put_px(x, y, (underline || ((bits >> (7 - gx)) & 1)) ? fg : bg);
+            int cov = 0;
+            for (int j = 0; j < SS; ++j) {
+                int fy = (((y - y0) * SS + j) * FONT_H) / (ch * SS);   // font row 0..FONT_H-1
+                uint8_t bits = rows[fy];
+                int uline = ul && (fy == FONT_H - 2);
+                for (int i = 0; i < SS; ++i) {
+                    int fx = (((x - x0) * SS + i) * 8) / (cw * SS);     // font col 0..7
+                    if (uline || ((bits >> (7 - fx)) & 1)) cov++;
+                }
+            }
+            put_px(x, y, cov == 0 ? bg : (cov == SS * SS ? fg : blend(fg, bg, cov)));
         }
     }
 }
