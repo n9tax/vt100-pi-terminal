@@ -72,6 +72,7 @@ int main(void) {
     long long next_blink = now_ms() + 500;
     long long flash_until = -1;   // -1 = no visual-bell flash pending
     int blink = 0;
+    int was_scrolling = 0;        // to restore the cursor when a slide settles
 
     struct pollfd pfds[2];
     pfds[0].fd = serial_fd(); pfds[0].events = POLLIN;
@@ -122,7 +123,9 @@ int main(void) {
                 }
             }
             if (kn) serial_write(kb, (uint32_t)kn);
-            if (activity) screen_show_cursor();
+            // Don't paint the cursor mid-slide: the pan would smear it up the
+            // screen. It's restored once the slide settles (below).
+            if (activity && !textmode_scroll_busy()) screen_show_cursor();
 
             // Visual bell (no audible-bell hardware on this board).
             if (vt100_take_bell()) {
@@ -134,7 +137,10 @@ int main(void) {
         if (setup_active()) continue;   // don't blink/flash over the menu
 
         textmode_scroll_tick();                  // advance any in-flight smooth scroll
-        if (textmode_scroll_busy()) continue;    // hold off blink/bell mid-slide
+        if (was_scrolling && !textmode_scroll_busy())
+            screen_show_cursor();                // slide settled: restore the cursor
+        was_scrolling = textmode_scroll_busy();
+        if (was_scrolling) continue;             // hold off blink/bell mid-slide
 
         long long t = now_ms();
         if (flash_until >= 0 && t >= flash_until) {

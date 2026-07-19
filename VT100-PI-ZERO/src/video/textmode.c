@@ -47,6 +47,7 @@ static int line_h = 16;             // nominal row height in px (fb_height/ROWS)
 static int base_step = 10;          // pan px/frame at the configured speed
 static int anim_px = 0;             // pixels left to pan (>0 = a slide in flight)
 static int max_anim_px = 0;         // beyond this backlog we jump instead of slide
+static int scrolls_this_frame = 0;  // scrolls since the last tick; >1 => burst, jump
 
 // ---- palette ---------------------------------------------------------------
 // Fixed high-contrast palette for the Setup menu ("chrome"), so a bad terminal
@@ -318,7 +319,11 @@ void textmode_set_smooth(int on, int pps) {
 
 void textmode_smooth_line(void) {
     if (!smooth_on) { textmode_render_all(); return; }
-    if (anim_px + line_h > max_anim_px) {   // too far behind: jump to settled frame
+    ++scrolls_this_frame;
+    // A single scroll per batch slides; two or more in one batch is a burst whose
+    // rows overwrite each other at the bottom before the pan runs, so jump to the
+    // exact frame instead. Also jump if the backlog is already too deep.
+    if (scrolls_this_frame > 1 || anim_px + line_h > max_anim_px) {
         anim_px = 0;
         textmode_render_all();
         return;
@@ -327,6 +332,7 @@ void textmode_smooth_line(void) {
 }
 
 void textmode_scroll_tick(void) {
+    scrolls_this_frame = 0;   // new batch window starts after each tick
     if (anim_px <= 0) return;
 
     // Constant speed for uniform, non-jerky motion. If output out-runs the slide
