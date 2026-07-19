@@ -181,8 +181,8 @@ stack.
    `src/net/netlink.c`, a two-mode transport: a TCP Telnet client, or the
    system `ssh` client run over a PTY (`posix_openpt` + `fork`/`exec`), its
    master fd feeding the same ring as serial. Connects on boot from
-   `ssh_host`/`telnet_host` (see Configuration). Still to add: a Setup-menu
-   connect UI so you can pick a host without editing the config.
+   `ssh_host`/`telnet_host`, or set them in the Setup menu (Ctrl+F3) to connect
+   live; the Setup screen also shows the Pi's own IP so you can ssh *into* it.
 3. **Setup menu + settings persistence**: **done** — `src/settings.c` loads
    `~/.config/vt100-pi/vt100.conf`, and `src/setup.c` is the on-screen Ctrl+F3
    menu that edits, applies, and re-saves it live (see Configuration).

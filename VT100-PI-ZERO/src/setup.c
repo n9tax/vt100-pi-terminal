@@ -1,6 +1,7 @@
 // On-screen Setup menu. See setup.h. Renders directly into tm_cells and repaints
 // via textmode; navigation is Up/Down between fields, Left/Right to change enum
 // values, typing to edit text fields, Enter to save+apply, Ctrl+F3 to cancel.
+#define _GNU_SOURCE   // getifaddrs
 #include "setup.h"
 #include "config.h"
 #include "settings.h"
@@ -8,14 +9,22 @@
 #include "video/fonts.h"
 #include "video/themes.h"
 #include "io/serial_linux.h"
+#include "io/host_link.h"
+#include "net/netlink.h"
 
 #include <string.h>
 #include <stdio.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
-enum { F_SERIAL, F_BAUD, F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO,
-       F_SMOOTH, F_SPEED, F_FONT, NFIELDS };
+enum { F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_THEME, F_FG, F_BG,
+       F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_FONT, NFIELDS };
 
-static int is_text_field(int i) { return i == F_SERIAL || i == F_FG || i == F_BG; }
+static int is_text_field(int i) {
+    return i == F_SERIAL || i == F_FG || i == F_BG || i == F_SSH || i == F_TELNET;
+}
 
 static int active;
 static int sel;
@@ -23,11 +32,29 @@ static settings_t work;                     // edited copy
 static settings_t orig;                     // snapshot at open (for change detection)
 static cell_t saved[TERM_ROWS][TERM_COLS];  // terminal screen behind the menu
 static int esc;                             // escape-sequence parser state
+static char ip_str[64];                     // this Pi's IP (to ssh into it), shown in header
 
 static const int  bauds[]  = { 300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
 #define NBAUDS ((int)(sizeof bauds / sizeof bauds[0]))
+static const int  tports[] = { 23, 992, 2323 };
+#define NTPORTS ((int)(sizeof tports / sizeof tports[0]))
 
 int setup_active(void) { return active; }
+
+// This Pi's first non-loopback IPv4 address, for ssh-ing into it.
+static void find_ip(char *out, size_t n) {
+    snprintf(out, n, "%s", "(no network)");
+    struct ifaddrs *ifa = NULL, *p;
+    if (getifaddrs(&ifa) != 0) return;
+    for (p = ifa; p; p = p->ifa_next) {
+        if (!p->ifa_addr || p->ifa_addr->sa_family != AF_INET) continue;
+        if (p->ifa_flags & IFF_LOOPBACK) continue;
+        char ip[INET_ADDRSTRLEN];
+        struct sockaddr_in *sa = (struct sockaddr_in *)p->ifa_addr;
+        if (inet_ntop(AF_INET, &sa->sin_addr, ip, sizeof ip)) { snprintf(out, n, "%s", ip); break; }
+    }
+    freeifaddrs(ifa);
+}
 
 // ---- rendering -------------------------------------------------------------
 static void put(int r, int c, const char *s, uint8_t fg, uint8_t bg, uint8_t attr) {
@@ -40,6 +67,9 @@ static void field_value(int i, char *out, size_t n) {
     switch (i) {
         case F_SERIAL: snprintf(out, n, "%s", work.serial_dev); break;
         case F_BAUD:   snprintf(out, n, "%d", work.baud); break;
+        case F_SSH:    snprintf(out, n, "%s", work.ssh_host); break;
+        case F_TELNET: snprintf(out, n, "%s", work.telnet_host); break;
+        case F_TPORT:  snprintf(out, n, "%d", work.telnet_port); break;
         case F_THEME:  snprintf(out, n, "%s", settings_theme_name(work.theme)); break;
         case F_FG:     snprintf(out, n, "%s", work.fg_hex); break;
         case F_BG:     snprintf(out, n, "%s", work.bg_hex); break;
@@ -59,15 +89,18 @@ static void field_value(int i, char *out, size_t n) {
 
 static void draw(void) {
     static const char *labels[NFIELDS] = {
-        "Serial device", "Baud rate", "Theme", "Custom FG", "Custom BG",
-        "Cursor", "Local echo", "Smooth scroll", "Scroll speed", "Font",
+        "Serial device", "Baud rate", "SSH host", "Telnet host", "Telnet port",
+        "Theme", "Custom FG", "Custom BG", "Cursor", "Local echo",
+        "Smooth scroll", "Scroll speed", "Font",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
             tm_cells[r][c] = (cell_t){ ' ', 7, 0, 0 };
 
+    char hdr[128];
+    snprintf(hdr, sizeof hdr, "This Pi: %s   (ssh in here)", ip_str);
     put(1, 4, "VT100-PI-ZERO  \xC4\xC4  SETUP", 7, 0, ATTR_BOLD);
-    put(2, 4, "________________________________________", 7, 0, 0);
+    put(2, 4, hdr, 7, 0, 0);
 
     for (int i = 0; i < NFIELDS; ++i) {
         int r = 4 + i;
@@ -84,8 +117,8 @@ static void draw(void) {
     }
 
     put(TERM_ROWS - 4, 4, "Up/Down: field    Left/Right: change value", 7, 0, 0);
-    put(TERM_ROWS - 3, 4, "Serial device is typed (Backspace deletes)", 7, 0, 0);
-    put(TERM_ROWS - 2, 4, "Enter: save & apply     Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
+    put(TERM_ROWS - 3, 4, "Serial/SSH/Telnet hosts are typed (Backspace deletes)", 7, 0, 0);
+    put(TERM_ROWS - 2, 4, "Enter: save & apply/connect     Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
 
     textmode_render_all();
 }
@@ -100,6 +133,16 @@ static void change(int d) {
             for (int i = 0; i < NBAUDS; ++i) if (bauds[i] == work.baud) { idx = i; break; }
             idx = (idx + d + NBAUDS) % NBAUDS;
             work.baud = bauds[idx];
+            break;
+        }
+        case F_TPORT: {
+            int idx = 0, best = 1 << 30;
+            for (int i = 0; i < NTPORTS; ++i) {
+                int dd = tports[i] - work.telnet_port; if (dd < 0) dd = -dd;
+                if (dd < best) { best = dd; idx = i; }
+            }
+            idx = (idx + d + NTPORTS) % NTPORTS;
+            work.telnet_port = tports[idx];
             break;
         }
         case F_THEME:  { int nt = themes_count(); work.theme = (work.theme + d + nt) % nt; break; }
@@ -135,9 +178,11 @@ static void edit_text(uint8_t b) {   // the typed fields: serial device, custom 
     size_t cap;
     int    hexonly = 0;
     switch (sel) {
-        case F_FG: buf = work.fg_hex; cap = sizeof work.fg_hex; hexonly = 1; break;
-        case F_BG: buf = work.bg_hex; cap = sizeof work.bg_hex; hexonly = 1; break;
-        default:   buf = work.serial_dev; cap = sizeof work.serial_dev; break;
+        case F_FG:     buf = work.fg_hex; cap = sizeof work.fg_hex; hexonly = 1; break;
+        case F_BG:     buf = work.bg_hex; cap = sizeof work.bg_hex; hexonly = 1; break;
+        case F_SSH:    buf = work.ssh_host; cap = sizeof work.ssh_host; break;
+        case F_TELNET: buf = work.telnet_host; cap = sizeof work.telnet_host; break;
+        default:       buf = work.serial_dev; cap = sizeof work.serial_dev; break;
     }
     size_t n = strlen(buf);
     if (b == 0x7f || b == 0x08) { if (n > 0) buf[n - 1] = '\0'; return; }   // backspace
@@ -169,6 +214,21 @@ static void do_save(void) {
     if (strcmp(work.font_path, orig.font_path) != 0)
         textmode_reload_font();
 
+    // (Re)connect the host link if a network destination changed: ssh wins, else
+    // telnet, else back to serial. Prompts appear once the menu closes.
+    if (strcmp(work.ssh_host, orig.ssh_host) != 0 ||
+        strcmp(work.telnet_host, orig.telnet_host) != 0 ||
+        work.telnet_port != orig.telnet_port) {
+        netlink_close();
+        if (work.ssh_host[0] && netlink_connect_ssh(work.ssh_host) == 0)
+            host_link_set_write_fn(netlink_write);
+        else if (work.telnet_host[0] &&
+                 netlink_connect_telnet(work.telnet_host, work.telnet_port) == 0)
+            host_link_set_write_fn(netlink_write);
+        else
+            host_link_set_write_fn(serial_write);
+    }
+
     active = 0;
     textmode_set_chrome(0);
     restore_screen();   // repaints with the now-current theme/font
@@ -180,6 +240,7 @@ void setup_toggle(void) {
         work = g_settings;
         orig = g_settings;
         memcpy(saved, tm_cells, sizeof saved);
+        find_ip(ip_str, sizeof ip_str);   // refresh the Pi's IP for the header
         active = 1;
         sel = 0;
         esc = 0;
