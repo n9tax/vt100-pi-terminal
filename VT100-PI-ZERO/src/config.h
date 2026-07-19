@@ -42,4 +42,11 @@
 // A real terminal leaves this OFF (the host echoes).
 #define LOCAL_ECHO 0
 
+// ---- Smooth scroll ----------------------------------------------------------
+// Slide text up a few pixels per frame instead of jumping a whole line. Speed is
+// in pixels/second (a line is ~32px tall); bursts catch up and very fast output
+// falls back to jump scrolling.
+#define SMOOTH_SCROLL_DEFAULT 1
+#define SCROLL_SPEED_DEFAULT  600
+
 #endif // VT100_CONFIG_H

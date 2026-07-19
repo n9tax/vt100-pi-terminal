@@ -59,6 +59,7 @@ int main(void) {
                                settings_parse_hex(g_settings.bg_hex));
     textmode_set_theme(g_settings.theme);
     textmode_set_cursor_style(g_settings.cursor_style);
+    textmode_set_smooth(g_settings.smooth_scroll, g_settings.scroll_speed);
     serial_init(g_settings.serial_dev, g_settings.baud);
     kbd_init();
     screen_init();
@@ -79,8 +80,8 @@ int main(void) {
     while (1) {
         pfds[0].fd = serial_fd();   // may change if serial was reopened in Setup
 
-        // 50ms tick keeps the blink/bell timers responsive even with no I/O.
-        poll(pfds, 2, 50);
+        // ~60Hz while a smooth scroll is animating, else a lazy 50ms tick.
+        poll(pfds, 2, textmode_scroll_busy() ? 15 : 50);
 
         if (pfds[1].revents & POLLIN) kbd_poll();
 
@@ -131,6 +132,9 @@ int main(void) {
         }
 
         if (setup_active()) continue;   // don't blink/flash over the menu
+
+        textmode_scroll_tick();                  // advance any in-flight smooth scroll
+        if (textmode_scroll_busy()) continue;    // hold off blink/bell mid-slide
 
         long long t = now_ms();
         if (flash_until >= 0 && t >= flash_until) {

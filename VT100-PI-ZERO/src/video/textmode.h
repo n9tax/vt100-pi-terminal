@@ -55,17 +55,17 @@ void textmode_set_cursor_style(int style);   // 0 = block, 1 = underline
 void textmode_set_flash(int on);             // visual bell: invert everything
 
 // ---- Smooth scroll ---------------------------------------------------------
-// Not yet implemented on VT100-PI-ZERO (the Pico build's smooth scroll exists
-// to make the most of a DMA-scanned-out framebuffer; on a Pi Zero 2 W with a
-// real GPU this would be better done as a genuine animated blit — future
-// work). textmode_smooth_enabled() always reports off, so screen.c's scroll
-// path always takes its jump-scroll branch; the rest are correct no-ops.
-void textmode_set_smooth(int on, int pps);
+// A one-line whole-screen scroll can slide instead of jumping: screen.c calls
+// textmode_smooth_line() (which queues a pixel slide), and the main loop drives
+// textmode_scroll_tick() at ~60 Hz to pan the framebuffer up a few pixels per
+// frame, catching up faster when lines pile up. See textmode.c.
+void textmode_set_smooth(int on, int pps);   // enable + pixels/second
 int  textmode_smooth_enabled(void);
-void textmode_smooth_line(void);
-int  textmode_scroll_busy(void);
-void textmode_scroll_snap(void);
-void textmode_set_scroll_pace(int backlog);
+void textmode_smooth_line(void);             // queue one line's slide
+void textmode_scroll_tick(void);             // advance the slide one frame (main loop)
+int  textmode_scroll_busy(void);             // 1 while a slide is in flight
+void textmode_scroll_snap(void);             // finish any slide immediately
+void textmode_set_scroll_pace(int backlog);  // (pacing is derived internally)
 
 // Convenience for the boot splash: write a string starting at (row,col).
 void tm_puts(int row, int col, const char *s, uint8_t fg, uint8_t bg, uint8_t attr);

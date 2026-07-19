@@ -16,6 +16,8 @@ typedef struct {
     char font_path[256];    // "" = bundled/system font, else absolute .ttf path
     char fg_hex[8];         // custom-theme foreground "#RRGGBB"
     char bg_hex[8];         // custom-theme background "#RRGGBB"
+    int  smooth_scroll;     // 0/1
+    int  scroll_speed;      // pixels/second
 } settings_t;
 
 extern settings_t g_settings;

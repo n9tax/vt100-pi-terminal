@@ -12,7 +12,8 @@
 #include <string.h>
 #include <stdio.h>
 
-enum { F_SERIAL, F_BAUD, F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_FONT, NFIELDS };
+enum { F_SERIAL, F_BAUD, F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO,
+       F_SMOOTH, F_SPEED, F_FONT, NFIELDS };
 
 static int is_text_field(int i) { return i == F_SERIAL || i == F_FG || i == F_BG; }
 
@@ -44,6 +45,8 @@ static void field_value(int i, char *out, size_t n) {
         case F_BG:     snprintf(out, n, "%s", work.bg_hex); break;
         case F_CURSOR: snprintf(out, n, "%s", work.cursor_style ? "underline" : "block"); break;
         case F_ECHO:   snprintf(out, n, "%s", work.local_echo ? "on" : "off"); break;
+        case F_SMOOTH: snprintf(out, n, "%s", work.smooth_scroll ? "on" : "off"); break;
+        case F_SPEED:  snprintf(out, n, "%d px/s", work.scroll_speed); break;
         case F_FONT: {
             int idx = fonts_index_of(work.font_path);
             if (idx >= 0) snprintf(out, n, "%s", fonts_name(idx));
@@ -57,7 +60,7 @@ static void field_value(int i, char *out, size_t n) {
 static void draw(void) {
     static const char *labels[NFIELDS] = {
         "Serial device", "Baud rate", "Theme", "Custom FG", "Custom BG",
-        "Cursor", "Local echo", "Font",
+        "Cursor", "Local echo", "Smooth scroll", "Scroll speed", "Font",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
@@ -67,7 +70,7 @@ static void draw(void) {
     put(2, 4, "________________________________________", 7, 0, 0);
 
     for (int i = 0; i < NFIELDS; ++i) {
-        int r = 4 + i * 2;
+        int r = 4 + i;
         int selrow = (i == sel);
         char val[300];
         field_value(i, val, sizeof val);
@@ -102,6 +105,19 @@ static void change(int d) {
         case F_THEME:  { int nt = themes_count(); work.theme = (work.theme + d + nt) % nt; break; }
         case F_CURSOR: work.cursor_style ^= 1; break;
         case F_ECHO:   work.local_echo ^= 1; break;
+        case F_SMOOTH: work.smooth_scroll ^= 1; break;
+        case F_SPEED: {
+            static const int sp[] = { 300, 450, 600, 900, 1200, 1600 };
+            int ns = (int)(sizeof sp / sizeof sp[0]);
+            int idx = 0, best = 1 << 30;
+            for (int i = 0; i < ns; ++i) {
+                int dd = sp[i] - work.scroll_speed; if (dd < 0) dd = -dd;
+                if (dd < best) { best = dd; idx = i; }
+            }
+            idx = (idx + d + ns) % ns;
+            work.scroll_speed = sp[idx];
+            break;
+        }
         case F_FONT: {
             int n = fonts_count();
             int idx = fonts_index_of(work.font_path);
@@ -141,6 +157,7 @@ static void do_save(void) {
     textmode_set_custom_colors(settings_parse_hex(work.fg_hex), settings_parse_hex(work.bg_hex));
     textmode_set_theme(work.theme);
     textmode_set_cursor_style(work.cursor_style);
+    textmode_set_smooth(work.smooth_scroll, work.scroll_speed);
     if (strcmp(work.serial_dev, orig.serial_dev) != 0 || work.baud != orig.baud)
         serial_reconfigure(work.serial_dev, work.baud);
     if (strcmp(work.font_path, orig.font_path) != 0)

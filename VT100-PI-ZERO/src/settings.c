@@ -35,6 +35,9 @@ static const char *DEFAULT_FILE =
     "cursor     = block      # block | underline\n"
     "local_echo = off        # on | off  (a real terminal leaves this off; the host echoes)\n"
     "\n"
+    "smooth_scroll = on      # on | off  (slide text up instead of jumping)\n"
+    "scroll_speed  = 600     # pixels/second (a line is ~32px; bursts catch up)\n"
+    "\n"
     "# Custom-theme colours (used when theme = custom), #RRGGBB:\n"
     "fg_color   = " CUSTOM_FG_DEFAULT "\n"
     "bg_color   = " CUSTOM_BG_DEFAULT "\n"
@@ -77,6 +80,8 @@ static void set_defaults(void) {
     snprintf(g_settings.font_path, sizeof g_settings.font_path, "%s", FONT_TTF_PATH);
     snprintf(g_settings.fg_hex, sizeof g_settings.fg_hex, "%s", CUSTOM_FG_DEFAULT);
     snprintf(g_settings.bg_hex, sizeof g_settings.bg_hex, "%s", CUSTOM_BG_DEFAULT);
+    g_settings.smooth_scroll = SMOOTH_SCROLL_DEFAULT;
+    g_settings.scroll_speed = SCROLL_SPEED_DEFAULT;
 }
 
 static void resolve_path(void) {
@@ -122,6 +127,8 @@ static void apply(const char *key, const char *val) {
     else if (!strcasecmp(key, "font"))        snprintf(g_settings.font_path, sizeof g_settings.font_path, "%s", val);
     else if (!strcasecmp(key, "fg_color"))    snprintf(g_settings.fg_hex, sizeof g_settings.fg_hex, "%s", val);
     else if (!strcasecmp(key, "bg_color"))    snprintf(g_settings.bg_hex, sizeof g_settings.bg_hex, "%s", val);
+    else if (!strcasecmp(key, "smooth_scroll")) g_settings.smooth_scroll = parse_bool(val, g_settings.smooth_scroll);
+    else if (!strcasecmp(key, "scroll_speed"))  g_settings.scroll_speed = atoi(val);
     else fprintf(stderr, "settings: ignoring unknown key '%s'\n", key);
 }
 
@@ -197,6 +204,9 @@ void settings_save(void) {
         "cursor     = %s      # block | underline\n"
         "local_echo = %s        # on | off\n"
         "\n"
+        "smooth_scroll = %s      # on | off  (slide text up instead of jumping)\n"
+        "scroll_speed  = %d     # pixels/second (a line is ~32px; bursts catch up)\n"
+        "\n"
         "# Custom-theme colours (used when theme = custom), #RRGGBB:\n"
         "fg_color   = %s\n"
         "bg_color   = %s\n"
@@ -209,6 +219,7 @@ void settings_save(void) {
         g_settings.serial_dev, g_settings.baud, settings_theme_name(g_settings.theme),
         g_settings.cursor_style ? "underline" : "block",
         g_settings.local_echo ? "on" : "off",
+        g_settings.smooth_scroll ? "on" : "off", g_settings.scroll_speed,
         g_settings.fg_hex, g_settings.bg_hex, g_settings.font_path);
     fclose(f);
     fprintf(stderr, "settings: saved %s\n", cfg_path);

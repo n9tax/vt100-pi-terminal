@@ -40,6 +40,13 @@ static int screen_reverse = 0;      // DECSCNM
 static int flash_on = 0;            // visual bell
 static int blink_phase = 0;
 
+// ---- smooth scroll state ---------------------------------------------------
+static int smooth_on = 0;           // enabled by settings
+static int line_h = 16;             // nominal row height in px (fb_height/ROWS)
+static int base_step = 10;          // pan px/frame at the configured speed
+static int anim_px = 0;             // pixels left to pan (>0 = a slide in flight)
+static int max_anim_px = 0;         // beyond this backlog we jump instead of slide
+
 // ---- palette ---------------------------------------------------------------
 // All colour logic lives in themes.c; this just resolves an ANSI index for the
 // current theme (and the custom fg/bg for the "custom" theme).
@@ -215,6 +222,10 @@ void textmode_init(void) {
     int cell_h = ((int)fb_height + TERM_ROWS - 1) / TERM_ROWS;
     glyphs_init(cell_w, cell_h);
 
+    line_h = (int)fb_height / TERM_ROWS;
+    if (line_h < 1) line_h = 1;
+    max_anim_px = line_h * 8;   // >8 lines behind -> jump rather than slide
+
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
             tm_cells[r][c] = (cell_t){ ' ', 7, 0, 0 };
@@ -271,13 +282,62 @@ void textmode_set_flash(int on) {
     textmode_render_all();
 }
 
-// ---- smooth scroll: not implemented on VT100-PI-ZERO yet (see textmode.h) --
-void textmode_set_smooth(int on, int pps) { (void)on; (void)pps; }
-int  textmode_smooth_enabled(void) { return 0; }
-void textmode_smooth_line(void) {}
-int  textmode_scroll_busy(void) { return 0; }
-void textmode_scroll_snap(void) {}
-void textmode_set_scroll_pace(int backlog) { (void)backlog; }
+// ---- smooth scroll ---------------------------------------------------------
+// A one-line scroll leaves a blank row at the bottom and the (already-rendered)
+// content above it. So we slide by panning the framebuffer up a few pixels per
+// frame and filling the freshly-exposed strip at the bottom with the background,
+// then snap to the exact frame with a full render once the slide settles. The
+// main loop drives textmode_scroll_tick() at ~60 Hz while a slide is in flight.
+//
+// Pacing: each queued line adds line_h to anim_px; the step grows with the
+// backlog (up to a whole row per frame) so bursts catch up smoothly rather than
+// lagging, and a backlog bigger than max_anim_px jumps outright.
+
+int textmode_smooth_enabled(void) { return smooth_on; }
+
+void textmode_set_smooth(int on, int pps) {
+    smooth_on = on ? 1 : 0;
+    if (pps > 0) { base_step = pps / 60; if (base_step < 1) base_step = 1; }
+    if (!smooth_on) textmode_scroll_snap();
+}
+
+void textmode_smooth_line(void) {
+    if (!smooth_on) { textmode_render_all(); return; }
+    if (anim_px + line_h > max_anim_px) {   // too far behind: jump to settled frame
+        anim_px = 0;
+        textmode_render_all();
+        return;
+    }
+    anim_px += line_h;                      // queue one line's worth of slide
+}
+
+void textmode_scroll_tick(void) {
+    if (anim_px <= 0) return;
+
+    int pending_lines = (anim_px + line_h - 1) / line_h;
+    int step = base_step * pending_lines;   // catch up faster the more we're behind
+    if (step > line_h) step = line_h;       // never more than one row per frame
+    if (step > anim_px) step = anim_px;
+    if (step < 1) step = 1;
+
+    // Pan the whole framebuffer up by `step` pixels.
+    memmove(fb_mem, fb_mem + (size_t)step * fb_pitch, (size_t)((int)fb_height - step) * fb_pitch);
+
+    // Fill the newly-exposed bottom strip with the background colour.
+    uint32_t bg = palette_rgb(0);
+    uint8_t *dst = fb_mem + (size_t)((int)fb_height - step) * fb_pitch;
+    for (int y = 0; y < step; ++y) {
+        uint32_t *row = (uint32_t *)(dst + (size_t)y * fb_pitch);
+        for (int x = 0; x < (int)fb_width; ++x) row[x] = bg;
+    }
+
+    anim_px -= step;
+    if (anim_px <= 0) { anim_px = 0; textmode_render_all(); }   // snap exact
+}
+
+int  textmode_scroll_busy(void) { return anim_px > 0; }
+void textmode_scroll_snap(void) { if (anim_px > 0) { anim_px = 0; textmode_render_all(); } }
+void textmode_set_scroll_pace(int backlog) { (void)backlog; }   // pacing derived internally
 
 void tm_puts(int row, int col, const char *s, uint8_t fg, uint8_t bg, uint8_t attr) {
     for (int i = 0; s[i] && col + i < TERM_COLS; ++i) {

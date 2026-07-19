@@ -60,10 +60,18 @@ baud       = 9600        # 300 1200 2400 4800 9600 19200 38400 57600 115200
 theme      = amber       # color amber green white blue red yellow c64 vic20 c128 borland custom
 cursor     = block       # block | underline
 local_echo = off         # on | off
+smooth_scroll = on       # on | off  (slide text up instead of jumping)
+scroll_speed  = 600      # pixels/second (a line is ~32px; bursts catch up)
 fg_color   = #FFFFFF     # custom-theme foreground (used when theme = custom)
 bg_color   = #000000     # custom-theme background
 font       =             # empty = DejaVu (default), a bundled name, or an absolute .ttf path
 ```
+
+Smooth scroll slides the screen up a few pixels per frame instead of jumping a
+whole line. A single new line glides in over a few frames; when lines pile up it
+slides faster to catch up (up to a row per frame), and a burst more than ~8 lines
+behind falls back to an instant jump. `scroll_speed` sets the base rate; higher
+is snappier, lower is more languid.
 
 Themes: `color` is the full 16-colour ANSI palette; `amber`/`green`/`white`/
 `blue`/`red`/`yellow` are monochrome phosphor looks; `c64`, `vic20`, `c128`, and
