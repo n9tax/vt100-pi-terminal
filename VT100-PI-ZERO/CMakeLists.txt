@@ -27,6 +27,8 @@ add_executable(vt100-pi-zero
         src/io/serial_linux.c
         src/io/kbd_evdev.c
         src/io/host_link.c
+        src/net/telnet.c
+        src/net/netlink.c
         )
 
 target_include_directories(vt100-pi-zero PRIVATE

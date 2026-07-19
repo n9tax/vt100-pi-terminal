@@ -18,6 +18,8 @@ typedef struct {
     char bg_hex[8];         // custom-theme background "#RRGGBB"
     int  smooth_scroll;     // 0/1
     int  scroll_speed;      // pixels/second
+    char telnet_host[128];  // "" = use serial; else connect Telnet on boot
+    int  telnet_port;       // default 23
 } settings_t;
 
 extern settings_t g_settings;

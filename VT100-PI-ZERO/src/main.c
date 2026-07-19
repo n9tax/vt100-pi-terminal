@@ -17,6 +17,7 @@
 #include "io/serial_linux.h"
 #include "io/kbd_evdev.h"
 #include "io/host_link.h"
+#include "net/netlink.h"
 #include "terminal/screen.h"
 #include "terminal/vt100.h"
 
@@ -78,6 +79,10 @@ static int inbuf_pop(void) {
     return b;
 }
 
+// Network (Telnet) received bytes land in the same ring as serial, so they get
+// the same paced feed / smooth scroll.
+static void net_emit(uint8_t b) { inbuf_push(b); }
+
 int main(void) {
     settings_load();                        // ~/.config/vt100-pi/vt100.conf -> g_settings
 
@@ -91,7 +96,14 @@ int main(void) {
     kbd_init();
     screen_init();
     vt100_init();
-    host_link_set_write_fn(serial_write);   // MVP: serial is the only transport
+    host_link_set_write_fn(serial_write);   // default transport: serial
+
+    // Optional network host link: connect over Telnet on boot if configured, and
+    // route keyboard/replies out the socket instead of the serial port.
+    netlink_set_emit(net_emit);
+    if (g_settings.telnet_host[0]
+        && netlink_connect_telnet(g_settings.telnet_host, g_settings.telnet_port) == 0)
+        host_link_set_write_fn(netlink_write);
 
     splash_draw();
     int booting = 1;
@@ -102,17 +114,19 @@ int main(void) {
     long long last_out = 0;       // last host-output time (for idle cursor)
     int cur_shown = 0;            // is the cursor currently painted?
 
-    struct pollfd pfds[3];
+    struct pollfd pfds[4];
     pfds[0].fd = serial_fd();          pfds[0].events = POLLIN;
     pfds[1].fd = kbd_fd();             pfds[1].events = POLLIN;
     pfds[2].fd = textmode_drm_fd();    pfds[2].events = POLLIN;   // page-flip events
+    pfds[3].fd = netlink_fd();         pfds[3].events = POLLIN;   // -1 when not connected
 
     while (1) {
-        pfds[0].fd = serial_fd();   // may change if serial was reopened in Setup
+        pfds[0].fd = serial_fd();    // may change if serial was reopened in Setup
+        pfds[3].fd = netlink_fd();   // changes on connect/disconnect
 
         // Wake on I/O or the vblank flip event; a short timeout keeps a smooth
         // scroll advancing when nothing else is happening.
-        poll(pfds, 3, (textmode_scroll_busy() || textmode_flip_pending()) ? 15 : 50);
+        poll(pfds, 4, (textmode_scroll_busy() || textmode_flip_pending()) ? 15 : 50);
 
         if (pfds[2].revents & POLLIN) textmode_handle_flip();   // a page flip completed
         if (pfds[1].revents & POLLIN) kbd_poll();
@@ -136,9 +150,16 @@ int main(void) {
         } else {
             int activity = 0;
 
-            // Drain the kernel serial buffer into our ring (fast, no processing).
-            int c;
-            while ((c = serial_getc()) >= 0) inbuf_push((uint8_t)c);
+            // Host -> ring. From the network if connected (Telnet-filtered bytes
+            // arrive via net_emit), else from the serial port. If the network link
+            // drops, fall back to serial.
+            if (netlink_connected()) {
+                netlink_poll();
+                if (!netlink_connected()) host_link_set_write_fn(serial_write);
+            } else {
+                int c;
+                while ((c = serial_getc()) >= 0) inbuf_push((uint8_t)c);
+            }
 
             // Feed the terminal from the ring. Normally paced so at most ~2 lines
             // slide at once and the ring absorbs the burst; but once more than
@@ -169,7 +190,7 @@ int main(void) {
                     if (k == '\r') vt100_feed('\n');
                 }
             }
-            if (kn) serial_write(kb, (uint32_t)kn);
+            if (kn) host_write(kb, (uint32_t)kn);   // to the active transport (serial or net)
             if (activity) last_out = now_ms();   // cursor stays hidden until output idles
 
             // Visual bell (no audible-bell hardware on this board).

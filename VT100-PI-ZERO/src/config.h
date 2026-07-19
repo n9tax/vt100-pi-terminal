@@ -49,4 +49,10 @@
 #define SMOOTH_SCROLL_DEFAULT 1
 #define SCROLL_SPEED_DEFAULT  300
 
+// ---- Network host link ------------------------------------------------------
+// Optional Telnet destination. If telnet_host is set, the terminal connects over
+// TCP on boot instead of using the serial link. Empty = serial.
+#define TELNET_HOST_DEFAULT ""
+#define TELNET_PORT_DEFAULT 23
+
 #endif // VT100_CONFIG_H

@@ -65,7 +65,13 @@ scroll_speed  = 600      # pixels/second (a line is ~32px; bursts catch up)
 fg_color   = #FFFFFF     # custom-theme foreground (used when theme = custom)
 bg_color   = #000000     # custom-theme background
 font       =             # empty = DejaVu (default), a bundled name, or an absolute .ttf path
+telnet_host =            # set to connect over Telnet on boot instead of serial
+telnet_port = 23
 ```
+
+Set `telnet_host` to a hostname/IP and the terminal connects to it over Telnet
+on boot (falling back to serial if the connection fails), sending its keystrokes
+to the socket. Leave it empty to use the serial host link.
 
 Smooth scroll slides the screen up a few pixels per frame instead of jumping a
 whole line. A single new line glides in over a few frames; when lines pile up it
