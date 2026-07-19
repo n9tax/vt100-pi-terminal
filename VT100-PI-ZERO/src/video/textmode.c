@@ -60,6 +60,7 @@ static int base_step = 10;          // min pan px/frame (the configured glide sp
 static int d = 0;                   // pixels left to settle (>0 = a slide in flight)
 static int pending = 0;             // rows currently stacked above the content
 static int backlog_lines = 0;       // lines still buffered in the serial ring (look-ahead)
+static int exact_rows = 1;          // 1 when line_h*ROWS == fb_height (no scroll drift)
 
 // ---- palette ---------------------------------------------------------------
 // Fixed high-contrast palette for the Setup menu ("chrome"), so a bad terminal
@@ -258,6 +259,7 @@ void textmode_init(void) {
     // MAXPEND scrolled-off rows can be stacked and the window panned across them.
     line_h = (int)fb_height / TERM_ROWS;
     if (line_h < 1) line_h = 1;
+    exact_rows = (line_h * TERM_ROWS == (int)fb_height);   // no drift -> skip settle re-render
     content_y0 = MAXPEND * line_h;
     tall_h = content_y0 + (int)fb_height;
     tall_mem = calloc((size_t)tall_h * fb_pitch, 1);
@@ -290,9 +292,11 @@ void textmode_render_all(void) {
 void textmode_set_blink(int on) {
     if (blink_phase == on) return;
     blink_phase = on;
-    // Cheap on a Pi Zero 2 W: just redraw everything rather than tracking
-    // which cells have ATTR_BLINK set.
-    textmode_render_all();
+    // Only repaint if something actually blinks -- otherwise this fires a wasted
+    // full-screen render on every phase toggle (a periodic hitch during scroll).
+    for (int r = 0; r < TERM_ROWS; ++r)
+        for (int c = 0; c < TERM_COLS; ++c)
+            if (tm_cells[r][c].attr & ATTR_BLINK) { textmode_render_all(); return; }
 }
 
 void textmode_set_screen_reverse(int on) {
@@ -389,7 +393,7 @@ void textmode_scroll_tick(void) {
     d -= step;
     if (d <= 0) {
         d = 0; pending = 0;               // settled; stacked rows are now off-window
-        textmode_render_all();            // exact re-render clears any drift
+        if (!exact_rows) textmode_render_all();   // only needed to clear drift
     }
     dirty = 1;                     // the window moved, so re-present
 }
