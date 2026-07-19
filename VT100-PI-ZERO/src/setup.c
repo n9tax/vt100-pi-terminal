@@ -133,14 +133,20 @@ static void change(int d) {
 static void edit_text(uint8_t b) {   // the typed fields: serial device, custom fg/bg
     char  *buf;
     size_t cap;
+    int    hexonly = 0;
     switch (sel) {
-        case F_FG: buf = work.fg_hex; cap = sizeof work.fg_hex; break;
-        case F_BG: buf = work.bg_hex; cap = sizeof work.bg_hex; break;
+        case F_FG: buf = work.fg_hex; cap = sizeof work.fg_hex; hexonly = 1; break;
+        case F_BG: buf = work.bg_hex; cap = sizeof work.bg_hex; hexonly = 1; break;
         default:   buf = work.serial_dev; cap = sizeof work.serial_dev; break;
     }
     size_t n = strlen(buf);
-    if ((b == 0x7f || b == 0x08) && n > 0) buf[n - 1] = '\0';           // backspace
-    else if (b >= 0x20 && b < 0x7f && n + 1 < cap) { buf[n] = (char)b; buf[n + 1] = '\0'; }
+    if (b == 0x7f || b == 0x08) { if (n > 0) buf[n - 1] = '\0'; return; }   // backspace
+    if (hexonly) {   // colour fields accept only # and hex digits
+        int ishex = (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') ||
+                    (b >= 'A' && b <= 'F') || b == '#';
+        if (!ishex) return;
+    }
+    if (b >= 0x20 && b < 0x7f && n + 1 < cap) { buf[n] = (char)b; buf[n + 1] = '\0'; }
 }
 
 static void restore_screen(void) {
@@ -164,6 +170,7 @@ static void do_save(void) {
         textmode_reload_font();
 
     active = 0;
+    textmode_set_chrome(0);
     restore_screen();   // repaints with the now-current theme/font
 }
 
@@ -176,9 +183,11 @@ void setup_toggle(void) {
         active = 1;
         sel = 0;
         esc = 0;
+        textmode_set_chrome(1);   // Setup always readable, whatever the theme
         draw();
     } else {
         active = 0;         // second Ctrl+F3 = cancel
+        textmode_set_chrome(0);
         restore_screen();
     }
 }

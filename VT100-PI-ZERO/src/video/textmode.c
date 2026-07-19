@@ -35,6 +35,7 @@ static uint32_t fb_pitch, fb_width, fb_height;
 
 static int cur_theme = 1;           // amber; overridden from settings at startup
 static uint32_t cur_custom_fg = 0xffffff, cur_custom_bg = 0x000000;
+static int chrome_on = 0;           // Setup menu: force a readable fixed palette
 static int cursor_style = 0;        // 0 = block, 1 = underline
 static int screen_reverse = 0;      // DECSCNM
 static int flash_on = 0;            // visual bell
@@ -48,9 +49,21 @@ static int anim_px = 0;             // pixels left to pan (>0 = a slide in fligh
 static int max_anim_px = 0;         // beyond this backlog we jump instead of slide
 
 // ---- palette ---------------------------------------------------------------
-// All colour logic lives in themes.c; this just resolves an ANSI index for the
+// Fixed high-contrast palette for the Setup menu ("chrome"), so a bad terminal
+// theme / custom colour can never make Setup itself unreadable — you can always
+// open it and fix things.
+static uint32_t chrome_rgb(uint8_t idx) {
+    switch (idx & 0xf) {
+        case 0:  return 0x00007a;   // background: setup blue
+        case 7:  return 0xc8c8c8;   // normal text: light grey
+        default: return 0xffffff;   // bold/bright: white
+    }
+}
+
+// All colour logic lives in themes.c; this resolves an ANSI index for the
 // current theme (and the custom fg/bg for the "custom" theme).
 static uint32_t palette_rgb(uint8_t idx) {
+    if (chrome_on) return chrome_rgb(idx);
     return theme_rgb(cur_theme, idx, cur_custom_fg, cur_custom_bg);
 }
 
@@ -274,6 +287,8 @@ void textmode_set_custom_colors(uint32_t fg, uint32_t bg) {
     if (themes_is_custom(cur_theme)) textmode_render_all();
 }
 
+void textmode_set_chrome(int on) { chrome_on = on ? 1 : 0; }
+
 void textmode_set_cursor_style(int style) { cursor_style = style ? 1 : 0; }
 
 void textmode_set_flash(int on) {
@@ -314,9 +329,10 @@ void textmode_smooth_line(void) {
 void textmode_scroll_tick(void) {
     if (anim_px <= 0) return;
 
-    int pending_lines = (anim_px + line_h - 1) / line_h;
-    int step = base_step * pending_lines;   // catch up faster the more we're behind
-    if (step > line_h) step = line_h;       // never more than one row per frame
+    // Constant speed for uniform, non-jerky motion. If output out-runs the slide
+    // the backlog grows until it passes max_anim_px, at which point smooth_line
+    // jumps to catch up (rather than visibly speeding the slide up and down).
+    int step = base_step;
     if (step > anim_px) step = anim_px;
     if (step < 1) step = 1;
 
