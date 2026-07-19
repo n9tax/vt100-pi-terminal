@@ -46,7 +46,10 @@
 // Slide text up a few pixels per frame instead of jumping a whole line. Speed is
 // in pixels/second (a line is ~32px tall); bursts catch up and very fast output
 // falls back to jump scrolling.
-#define SMOOTH_SCROLL_DEFAULT 1
+// Off by default for now: the current pixel-pan smooth scroll is imperfect for
+// fast/continuous output (text arriving mid-slide misaligns). Enable it in Setup
+// to try it; a proper scrolling-framebuffer rework is planned.
+#define SMOOTH_SCROLL_DEFAULT 0
 #define SCROLL_SPEED_DEFAULT  600
 
 #endif // VT100_CONFIG_H
