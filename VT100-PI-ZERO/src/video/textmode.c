@@ -356,7 +356,14 @@ void textmode_smooth_line(void) {
            tall_mem + (size_t)content_y0 * fb_pitch,
            (size_t)line_h * fb_pitch);
 
-    textmode_render_all();   // content region now holds the post-scroll frame
+    // Update the content region cheaply: shift it up one row (memmove) and render
+    // only the new bottom row, instead of a full re-render every scroll -- that
+    // keeps per-scroll work small so frames stay on the vblank cadence (a full
+    // render_all() on settle corrects any sub-pixel drift on odd row heights).
+    memmove(fb_mem, fb_mem + (size_t)line_h * fb_pitch,
+            (size_t)((int)fb_height - line_h) * fb_pitch);
+    for (int c = 0; c < TERM_COLS; ++c) draw_cell(TERM_ROWS - 1, c, 0);
+
     pending++;
     d += line_h;
     dirty = 1;
@@ -377,7 +384,10 @@ void textmode_scroll_tick(void) {
     if (step < 1) step = 1;
 
     d -= step;
-    if (d <= 0) { d = 0; pending = 0; }   // settled; stacked rows are now off-window
+    if (d <= 0) {
+        d = 0; pending = 0;               // settled; stacked rows are now off-window
+        textmode_render_all();            // exact re-render clears any drift
+    }
     dirty = 1;                     // the window moved, so re-present
 }
 

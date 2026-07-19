@@ -36,7 +36,7 @@ static const char *DEFAULT_FILE =
     "local_echo = off        # on | off  (a real terminal leaves this off; the host echoes)\n"
     "\n"
     "smooth_scroll = on      # on | off  (slide text up instead of jumping)\n"
-    "scroll_speed  = 600     # pixels/second (a line is ~32px; bursts catch up)\n"
+    "scroll_speed  = 300     # pixels/second (a line is ~32px; bursts catch up)\n"
     "\n"
     "# Custom-theme colours (used when theme = custom), #RRGGBB:\n"
     "fg_color   = " CUSTOM_FG_DEFAULT "\n"

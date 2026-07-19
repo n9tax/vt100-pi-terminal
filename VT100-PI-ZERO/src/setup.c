@@ -107,7 +107,7 @@ static void change(int d) {
         case F_ECHO:   work.local_echo ^= 1; break;
         case F_SMOOTH: work.smooth_scroll ^= 1; break;
         case F_SPEED: {
-            static const int sp[] = { 300, 450, 600, 900, 1200, 1600 };
+            static const int sp[] = { 60, 100, 150, 200, 300, 450, 600, 900, 1200 };
             int ns = (int)(sizeof sp / sizeof sp[0]);
             int idx = 0, best = 1 << 30;
             for (int i = 0; i < ns; ++i) {

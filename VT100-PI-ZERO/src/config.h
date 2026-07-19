@@ -47,6 +47,6 @@
 // in pixels/second (a line is ~32px tall); bursts catch up and very fast output
 // falls back to jump scrolling.
 #define SMOOTH_SCROLL_DEFAULT 1
-#define SCROLL_SPEED_DEFAULT  600
+#define SCROLL_SPEED_DEFAULT  300
 
 #endif // VT100_CONFIG_H
