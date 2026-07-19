@@ -23,9 +23,15 @@
 cell_t tm_cells[TERM_ROWS][TERM_COLS];
 
 static int drm_fd = -1;
-static uint32_t crtc_id, connector_id, fb_id, dumb_handle;
-static uint8_t *fb_mem;
-static uint32_t fb_pitch, fb_width, fb_height;
+static uint32_t crtc_id, connector_id;
+static uint32_t db_handle[2], db_fbid[2];   // two scanout buffers (double-buffered)
+static uint8_t *db_mem[2];
+static uint8_t *shadow;                      // RAM render target
+static uint8_t *fb_mem;                       // == shadow; all rendering writes here
+static uint32_t fb_pitch, fb_width, fb_height, fb_size;
+static int front_idx = 0, back_idx = 1;      // which buffer is scanning / free
+static int flipped_to = 0, flip_pending = 0; // page-flip in flight bookkeeping
+static int dirty = 0;                         // shadow changed since last present
 
 // No fixed cell size: the TERM_COLS x TERM_ROWS grid is stretched to fill the
 // entire display. Each cell's pixel rectangle is derived from its row/col (see
@@ -118,33 +124,42 @@ static void open_display(void) {
     }
     if (enc) drmModeFreeEncoder(enc);
 
-    // Dumb buffer: XRGB8888.
-    struct drm_mode_create_dumb creq = { .width = fb_width, .height = fb_height, .bpp = 32 };
-    if (drmIoctl(drm_fd, DRM_IOCTL_MODE_CREATE_DUMB, &creq) < 0) {
-        fprintf(stderr, "textmode: DRM_IOCTL_MODE_CREATE_DUMB failed\n");
-        exit(1);
+    // Two dumb buffers (XRGB8888) for tear-free double-buffered page flips, plus
+    // a RAM shadow that all rendering targets. present() copies shadow into the
+    // free buffer and flips to it at the vertical blank.
+    for (int i = 0; i < 2; ++i) {
+        struct drm_mode_create_dumb creq = { .width = fb_width, .height = fb_height, .bpp = 32 };
+        if (drmIoctl(drm_fd, DRM_IOCTL_MODE_CREATE_DUMB, &creq) < 0) {
+            fprintf(stderr, "textmode: DRM_IOCTL_MODE_CREATE_DUMB failed\n");
+            exit(1);
+        }
+        db_handle[i] = creq.handle;
+        fb_pitch = creq.pitch;
+        fb_size = (uint32_t)creq.size;
+        if (drmModeAddFB(drm_fd, fb_width, fb_height, 24, 32, fb_pitch, db_handle[i], &db_fbid[i]) < 0) {
+            fprintf(stderr, "textmode: drmModeAddFB failed\n");
+            exit(1);
+        }
+        struct drm_mode_map_dumb mreq = { .handle = db_handle[i] };
+        if (drmIoctl(drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq) < 0) {
+            fprintf(stderr, "textmode: DRM_IOCTL_MODE_MAP_DUMB failed\n");
+            exit(1);
+        }
+        db_mem[i] = mmap(0, (size_t)creq.size, PROT_READ | PROT_WRITE, MAP_SHARED, drm_fd, (off_t)mreq.offset);
+        if (db_mem[i] == MAP_FAILED) {
+            fprintf(stderr, "textmode: mmap framebuffer failed\n");
+            exit(1);
+        }
+        memset(db_mem[i], 0, creq.size);
     }
-    dumb_handle = creq.handle;
-    fb_pitch = creq.pitch;
 
-    if (drmModeAddFB(drm_fd, fb_width, fb_height, 24, 32, fb_pitch, dumb_handle, &fb_id) < 0) {
-        fprintf(stderr, "textmode: drmModeAddFB failed\n");
-        exit(1);
-    }
+    shadow = malloc(fb_size);
+    if (!shadow) { fprintf(stderr, "textmode: shadow alloc failed\n"); exit(1); }
+    memset(shadow, 0, fb_size);
+    fb_mem = shadow;
+    front_idx = 0; back_idx = 1; flip_pending = 0;
 
-    struct drm_mode_map_dumb mreq = { .handle = dumb_handle };
-    if (drmIoctl(drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq) < 0) {
-        fprintf(stderr, "textmode: DRM_IOCTL_MODE_MAP_DUMB failed\n");
-        exit(1);
-    }
-    fb_mem = mmap(0, (size_t)creq.size, PROT_READ | PROT_WRITE, MAP_SHARED, drm_fd, (off_t)mreq.offset);
-    if (fb_mem == MAP_FAILED) {
-        fprintf(stderr, "textmode: mmap framebuffer failed\n");
-        exit(1);
-    }
-    memset(fb_mem, 0, creq.size);
-
-    if (drmModeSetCrtc(drm_fd, crtc_id, fb_id, 0, 0, &connector_id, 1, &mode) < 0) {
+    if (drmModeSetCrtc(drm_fd, crtc_id, db_fbid[0], 0, 0, &connector_id, 1, &mode) < 0) {
         fprintf(stderr, "textmode: drmModeSetCrtc failed\n");
         exit(1);
     }
@@ -157,6 +172,7 @@ static void open_display(void) {
 static inline void put_px(int x, int y, uint32_t rgb) {
     if ((unsigned)x >= fb_width || (unsigned)y >= fb_height) return;
     *(uint32_t *)(fb_mem + (uint32_t)y * fb_pitch + (uint32_t)x * 4) = rgb;
+    dirty = 1;
 }
 
 // Pixel bounds of a cell. The grid is stretched across the whole framebuffer,
@@ -353,8 +369,43 @@ void textmode_scroll_tick(void) {
         for (int x = 0; x < (int)fb_width; ++x) row[x] = bg;
     }
 
+    dirty = 1;
     anim_px -= step;
     if (anim_px <= 0) { anim_px = 0; textmode_render_all(); }   // snap exact
+}
+
+// ---- present / page flip (double-buffered, vsync) --------------------------
+static void on_flip(int fd, unsigned seq, unsigned s, unsigned us, void *data) {
+    (void)fd; (void)seq; (void)s; (void)us; (void)data;
+    front_idx = flipped_to;         // the buffer we flipped to is now scanning out
+    back_idx = 1 - front_idx;
+    flip_pending = 0;
+}
+
+int textmode_drm_fd(void) { return drm_fd; }
+int textmode_flip_pending(void) { return flip_pending; }
+
+// Process a page-flip-complete event (call when drm_fd is readable).
+void textmode_handle_flip(void) {
+    drmEventContext ev = { .version = DRM_EVENT_CONTEXT_VERSION, .page_flip_handler = on_flip };
+    drmHandleEvent(drm_fd, &ev);
+}
+
+// Copy the shadow to the free buffer and flip to it at the next vblank. No-op if
+// nothing changed or a flip is still in flight (keeps us to one frame per vblank).
+void textmode_present(void) {
+    if (flip_pending || !dirty) return;
+    memcpy(db_mem[back_idx], shadow, fb_size);
+    dirty = 0;
+    flipped_to = back_idx;
+    if (drmModePageFlip(drm_fd, crtc_id, db_fbid[back_idx], DRM_MODE_PAGE_FLIP_EVENT, NULL) == 0) {
+        flip_pending = 1;
+    } else {
+        // Flip rejected (driver without flip support, etc.): fall back to writing
+        // the front buffer directly so the screen still updates (may tear) rather
+        // than freezing. Retry the flip on the next present.
+        memcpy(db_mem[front_idx], shadow, fb_size);
+    }
 }
 
 int  textmode_scroll_busy(void) { return anim_px > 0; }

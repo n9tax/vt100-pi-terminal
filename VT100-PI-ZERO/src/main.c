@@ -74,16 +74,19 @@ int main(void) {
     int blink = 0;
     int was_scrolling = 0;        // to restore the cursor when a slide settles
 
-    struct pollfd pfds[2];
-    pfds[0].fd = serial_fd(); pfds[0].events = POLLIN;
-    pfds[1].fd = kbd_fd();    pfds[1].events = POLLIN;
+    struct pollfd pfds[3];
+    pfds[0].fd = serial_fd();          pfds[0].events = POLLIN;
+    pfds[1].fd = kbd_fd();             pfds[1].events = POLLIN;
+    pfds[2].fd = textmode_drm_fd();    pfds[2].events = POLLIN;   // page-flip events
 
     while (1) {
         pfds[0].fd = serial_fd();   // may change if serial was reopened in Setup
 
-        // ~60Hz while a smooth scroll is animating, else a lazy 50ms tick.
-        poll(pfds, 2, textmode_scroll_busy() ? 15 : 50);
+        // Wake on I/O or the vblank flip event; a short timeout keeps a smooth
+        // scroll advancing when nothing else is happening.
+        poll(pfds, 3, (textmode_scroll_busy() || textmode_flip_pending()) ? 15 : 50);
 
+        if (pfds[2].revents & POLLIN) textmode_handle_flip();   // a page flip completed
         if (pfds[1].revents & POLLIN) kbd_poll();
 
         if (!booting && kbd_take_setup_toggle()) setup_toggle();
@@ -134,23 +137,29 @@ int main(void) {
             }
         }
 
-        if (setup_active()) continue;   // don't blink/flash over the menu
-
-        textmode_scroll_tick();                  // advance any in-flight smooth scroll
-        if (was_scrolling && !textmode_scroll_busy())
-            screen_show_cursor();                // slide settled: restore the cursor
-        was_scrolling = textmode_scroll_busy();
-        if (was_scrolling) continue;             // hold off blink/bell mid-slide
-
-        long long t = now_ms();
-        if (flash_until >= 0 && t >= flash_until) {
-            textmode_set_flash(0);
-            flash_until = -1;
+        // Advance a smooth scroll one step per vblank (gated on the flip so the
+        // slide is paced to the display, not the CPU loop).
+        if (!booting && !setup_active() && !textmode_flip_pending()) {
+            textmode_scroll_tick();
+            if (was_scrolling && !textmode_scroll_busy())
+                screen_show_cursor();            // slide settled: restore the cursor
+            was_scrolling = textmode_scroll_busy();
         }
-        if (t >= next_blink) {
-            blink ^= 1;
-            textmode_set_blink(blink);
-            next_blink = t + 500;
+
+        // Blink / bell timers, only when idle (not in Setup, not mid-slide).
+        if (!setup_active() && !textmode_scroll_busy()) {
+            long long t = now_ms();
+            if (flash_until >= 0 && t >= flash_until) {
+                textmode_set_flash(0);
+                flash_until = -1;
+            }
+            if (t >= next_blink) {
+                blink ^= 1;
+                textmode_set_blink(blink);
+                next_blink = t + 500;
+            }
         }
+
+        textmode_present();   // publish the shadow to the display (vsync flip) if it changed
     }
 }

@@ -68,6 +68,16 @@ int  textmode_scroll_busy(void);             // 1 while a slide is in flight
 void textmode_scroll_snap(void);             // finish any slide immediately
 void textmode_set_scroll_pace(int backlog);  // (pacing is derived internally)
 
+// ---- Double-buffered presentation (vsync page flips) -----------------------
+// Rendering targets an off-screen shadow; textmode_present() copies it to a free
+// buffer and flips at the vblank, so the display never shows a half-drawn frame.
+// The main loop polls textmode_drm_fd() and calls textmode_handle_flip() on
+// readable, advances the frame, then calls textmode_present().
+int  textmode_drm_fd(void);        // add to the main poll() set
+void textmode_handle_flip(void);   // call when drm_fd is readable
+void textmode_present(void);       // publish the shadow (copy + flip if changed)
+int  textmode_flip_pending(void);  // 1 while a flip is awaiting vblank
+
 // Convenience for the boot splash: write a string starting at (row,col).
 void tm_puts(int row, int col, const char *s, uint8_t fg, uint8_t bg, uint8_t attr);
 
