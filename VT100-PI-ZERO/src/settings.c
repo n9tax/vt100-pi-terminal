@@ -1,6 +1,7 @@
 // See settings.h. Small key=value parser; no external config library.
 #include "settings.h"
 #include "config.h"
+#include "video/themes.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,9 +31,13 @@ static const char *DEFAULT_FILE =
     "baud       = " STR(SERIAL_BAUD) "   # 300 1200 2400 4800 9600 19200 38400 57600 115200\n"
     "\n"
     "# ---- Display ----\n"
-    "theme      = amber      # color amber green white blue red yellow\n"
+    "theme      = amber      # color amber green white blue red yellow c64 vic20 c128 borland custom\n"
     "cursor     = block      # block | underline\n"
     "local_echo = off        # on | off  (a real terminal leaves this off; the host echoes)\n"
+    "\n"
+    "# Custom-theme colours (used when theme = custom), #RRGGBB:\n"
+    "fg_color   = " CUSTOM_FG_DEFAULT "\n"
+    "bg_color   = " CUSTOM_BG_DEFAULT "\n"
     "\n"
     "# ---- Font ----\n"
     "# empty = DejaVu (default). Or a bundled name: Liberation Mono, Noto Sans Mono,\n"
@@ -55,17 +60,6 @@ static int parse_bool(const char *v, int fallback) {
     return fallback;
 }
 
-static int parse_theme(const char *v, int fallback) {
-    static const struct { const char *name; int val; } t[] = {
-        {"color", THEME_COLOR}, {"amber", THEME_AMBER}, {"green", THEME_GREEN},
-        {"white", THEME_WHITE}, {"blue", THEME_BLUE}, {"red", THEME_RED},
-        {"yellow", THEME_YELLOW},
-    };
-    for (unsigned i = 0; i < sizeof t / sizeof t[0]; ++i)
-        if (!strcasecmp(v, t[i].name)) return t[i].val;
-    return fallback;
-}
-
 static int parse_cursor(const char *v, int fallback) {
     if (!strcasecmp(v, "block")) return 0;
     if (!strcasecmp(v, "underline") || !strcasecmp(v, "line")) return 1;
@@ -76,10 +70,13 @@ static int parse_cursor(const char *v, int fallback) {
 static void set_defaults(void) {
     snprintf(g_settings.serial_dev, sizeof g_settings.serial_dev, "%s", SERIAL_DEV);
     g_settings.baud = SERIAL_BAUD;
-    g_settings.theme = THEME_DEFAULT;
+    int t = themes_index_of(THEME_DEFAULT_NAME);
+    g_settings.theme = t >= 0 ? t : 0;
     g_settings.cursor_style = 0;
     g_settings.local_echo = LOCAL_ECHO;
     snprintf(g_settings.font_path, sizeof g_settings.font_path, "%s", FONT_TTF_PATH);
+    snprintf(g_settings.fg_hex, sizeof g_settings.fg_hex, "%s", CUSTOM_FG_DEFAULT);
+    snprintf(g_settings.bg_hex, sizeof g_settings.bg_hex, "%s", CUSTOM_BG_DEFAULT);
 }
 
 static void resolve_path(void) {
@@ -119,10 +116,12 @@ static void write_default(void) {
 static void apply(const char *key, const char *val) {
     if (!strcasecmp(key, "serial_dev"))       snprintf(g_settings.serial_dev, sizeof g_settings.serial_dev, "%s", val);
     else if (!strcasecmp(key, "baud"))        g_settings.baud = atoi(val);
-    else if (!strcasecmp(key, "theme"))       g_settings.theme = parse_theme(val, g_settings.theme);
+    else if (!strcasecmp(key, "theme"))       { int t = themes_index_of(val); if (t >= 0) g_settings.theme = t; }
     else if (!strcasecmp(key, "cursor"))      g_settings.cursor_style = parse_cursor(val, g_settings.cursor_style);
     else if (!strcasecmp(key, "local_echo"))  g_settings.local_echo = parse_bool(val, g_settings.local_echo);
     else if (!strcasecmp(key, "font"))        snprintf(g_settings.font_path, sizeof g_settings.font_path, "%s", val);
+    else if (!strcasecmp(key, "fg_color"))    snprintf(g_settings.fg_hex, sizeof g_settings.fg_hex, "%s", val);
+    else if (!strcasecmp(key, "bg_color"))    snprintf(g_settings.bg_hex, sizeof g_settings.bg_hex, "%s", val);
     else fprintf(stderr, "settings: ignoring unknown key '%s'\n", key);
 }
 
@@ -160,16 +159,23 @@ void settings_load(void) {
 
 const char *settings_path(void) { return cfg_path; }
 
-const char *settings_theme_name(int theme) {
-    switch (theme) {
-        case THEME_COLOR:  return "color";
-        case THEME_GREEN:  return "green";
-        case THEME_WHITE:  return "white";
-        case THEME_BLUE:   return "blue";
-        case THEME_RED:    return "red";
-        case THEME_YELLOW: return "yellow";
-        case THEME_AMBER:  default: return "amber";
+const char *settings_theme_name(int theme) { return themes_name(theme); }
+
+uint32_t settings_parse_hex(const char *s) {
+    if (!s) return 0;
+    if (*s == '#') ++s;
+    uint32_t v = 0;
+    int n = 0;
+    for (; *s && n < 6; ++s, ++n) {
+        char c = *s;
+        int d;
+        if (c >= '0' && c <= '9') d = c - '0';
+        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else break;
+        v = (v << 4) | (uint32_t)d;
     }
+    return v;
 }
 
 void settings_save(void) {
@@ -187,17 +193,23 @@ void settings_save(void) {
         "baud       = %d   # 300 1200 2400 4800 9600 19200 38400 57600 115200\n"
         "\n"
         "# ---- Display ----\n"
-        "theme      = %s      # color amber green white blue red yellow\n"
+        "theme      = %s      # color amber green white blue red yellow c64 vic20 c128 borland custom\n"
         "cursor     = %s      # block | underline\n"
         "local_echo = %s        # on | off\n"
         "\n"
+        "# Custom-theme colours (used when theme = custom), #RRGGBB:\n"
+        "fg_color   = %s\n"
+        "bg_color   = %s\n"
+        "\n"
         "# ---- Font ----\n"
-        "# empty = DejaVu Sans Mono (default). Or a bundled name: Liberation Mono,\n"
-        "# Noto Sans Mono. Or an absolute path to any .ttf. (Setup/Ctrl+F3 cycles these.)\n"
+        "# empty = DejaVu (default). Or a bundled name: Liberation Mono, Noto Sans Mono,\n"
+        "# Hack, JetBrains Mono, Fira Code, Source Code Pro, VT323. Or an absolute .ttf\n"
+        "# path. Setup (Ctrl+F3) cycles the bundled fonts; see assets/FONTS.md.\n"
         "font       = %s\n",
         g_settings.serial_dev, g_settings.baud, settings_theme_name(g_settings.theme),
         g_settings.cursor_style ? "underline" : "block",
-        g_settings.local_echo ? "on" : "off", g_settings.font_path);
+        g_settings.local_echo ? "on" : "off",
+        g_settings.fg_hex, g_settings.bg_hex, g_settings.font_path);
     fclose(f);
     fprintf(stderr, "settings: saved %s\n", cfg_path);
 }

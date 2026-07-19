@@ -55,6 +55,8 @@ int main(void) {
     settings_load();                        // ~/.config/vt100-pi/vt100.conf -> g_settings
 
     textmode_init();                        // reads g_settings.font_path via glyphs.c
+    textmode_set_custom_colors(settings_parse_hex(g_settings.fg_hex),
+                               settings_parse_hex(g_settings.bg_hex));
     textmode_set_theme(g_settings.theme);
     textmode_set_cursor_style(g_settings.cursor_style);
     serial_init(g_settings.serial_dev, g_settings.baud);

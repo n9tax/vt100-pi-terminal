@@ -23,6 +23,7 @@ add_executable(vt100-pi-zero
         src/video/textmode.c
         src/video/glyphs.c
         src/video/fonts.c
+        src/video/themes.c
         src/io/serial_linux.c
         src/io/kbd_evdev.c
         src/io/host_link.c

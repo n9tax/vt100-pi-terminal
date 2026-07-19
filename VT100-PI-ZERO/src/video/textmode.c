@@ -6,6 +6,7 @@
 // double-buffered swap chain.
 #include "video/textmode.h"
 #include "video/glyphs.h"
+#include "video/themes.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -32,48 +33,18 @@ static uint32_t fb_pitch, fb_width, fb_height;
 // border. Fractional pixels are spread across cells, so adjacent columns/rows
 // differ by at most 1px, and the 8x16 font is nearest-neighbour scaled in.
 
-static int cur_theme = THEME_DEFAULT;
+static int cur_theme = 1;           // amber; overridden from settings at startup
+static uint32_t cur_custom_fg = 0xffffff, cur_custom_bg = 0x000000;
 static int cursor_style = 0;        // 0 = block, 1 = underline
 static int screen_reverse = 0;      // DECSCNM
 static int flash_on = 0;            // visual bell
 static int blink_phase = 0;
 
 // ---- palette ---------------------------------------------------------------
-// ANSI 0..15 -> 0xRRGGBB, used directly for THEME_COLOR.
-static const uint32_t ansi_palette[16] = {
-    0x000000, 0xaa0000, 0x00aa00, 0xaa5500, 0x0000aa, 0xaa00aa, 0x00aaaa, 0xaaaaaa,
-    0x555555, 0xff5555, 0x55ff55, 0xffff55, 0x5555ff, 0xff55ff, 0x55ffff, 0xffffff,
-};
-
-// Monochrome phosphor themes: every ANSI index maps to a shade of one hue by
-// its perceived brightness (bold/bright indices are brighter shades).
-static uint32_t phosphor_hue(int theme) {
-    switch (theme) {
-        case THEME_AMBER:  return 0xffb000;
-        case THEME_GREEN:  return 0x33ff33;
-        case THEME_WHITE:  return 0xffffff;
-        case THEME_BLUE:   return 0x66aaff;
-        case THEME_RED:    return 0xff3333;
-        case THEME_YELLOW: return 0xffee33;
-        default:           return 0xffffff;
-    }
-}
-
-static uint32_t scale_rgb(uint32_t rgb, int pct) {
-    int r = ((rgb >> 16) & 0xff) * pct / 100;
-    int g = ((rgb >> 8)  & 0xff) * pct / 100;
-    int b = (rgb & 0xff) * pct / 100;
-    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-}
-
+// All colour logic lives in themes.c; this just resolves an ANSI index for the
+// current theme (and the custom fg/bg for the "custom" theme).
 static uint32_t palette_rgb(uint8_t idx) {
-    if (cur_theme == THEME_COLOR) return ansi_palette[idx & 0xf];
-    // Monochrome: brightness by ANSI index (0=off .. 15=full), independent hue.
-    static const int brightness[16] = {
-        0, 55, 55, 55, 55, 55, 55, 70,
-        40, 100, 100, 100, 100, 100, 100, 100,
-    };
-    return scale_rgb(phosphor_hue(cur_theme), brightness[idx & 0xf]);
+    return theme_rgb(cur_theme, idx, cur_custom_fg, cur_custom_bg);
 }
 
 // ---- DRM setup ---------------------------------------------------------
@@ -281,9 +252,15 @@ void textmode_set_screen_reverse(int on) {
 }
 
 void textmode_set_theme(int theme) {
-    if (theme < 0 || theme >= THEME_COUNT) return;
+    if (theme < 0 || theme >= themes_count()) return;
     cur_theme = theme;
     textmode_render_all();
+}
+
+void textmode_set_custom_colors(uint32_t fg, uint32_t bg) {
+    cur_custom_fg = fg;
+    cur_custom_bg = bg;
+    if (themes_is_custom(cur_theme)) textmode_render_all();
 }
 
 void textmode_set_cursor_style(int style) { cursor_style = style ? 1 : 0; }

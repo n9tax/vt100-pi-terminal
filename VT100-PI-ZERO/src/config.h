@@ -23,17 +23,14 @@
 #define SERIAL_BAUD  9600
 
 // ---- Display theme ----------------------------------------------------------
-// THEME_COLOR = full 16-colour ANSI. AMBER/GREEN/WHITE/BLUE/RED/YELLOW = monochrome
-// phosphor (every colour mapped to shades of that hue by brightness).
-#define THEME_COLOR   0
-#define THEME_AMBER   1
-#define THEME_GREEN   2
-#define THEME_WHITE   3
-#define THEME_BLUE    4
-#define THEME_RED     5
-#define THEME_YELLOW  6
-#define THEME_COUNT   7
-#define THEME_DEFAULT THEME_AMBER
+// The full theme list (color, amber/green/... phosphor, c64/vic20/c128/borland
+// retro, custom) lives in src/video/themes.c. This is just the default, by name.
+#define THEME_DEFAULT_NAME "amber"
+
+// Default custom-theme colours (used when theme = custom), overridable in the
+// settings file / Setup menu as #RRGGBB.
+#define CUSTOM_FG_DEFAULT "#FFFFFF"
+#define CUSTOM_BG_DEFAULT "#000000"
 
 // ---- Font -----------------------------------------------------------------
 // TrueType font rendered (anti-aliased) into the glyph atlas. Leave empty to

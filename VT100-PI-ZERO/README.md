@@ -57,11 +57,21 @@ cursor style, local echo, or the font — no rebuild:
 ```
 serial_dev = /dev/serial0
 baud       = 9600        # 300 1200 2400 4800 9600 19200 38400 57600 115200
-theme      = amber       # color amber green white blue red yellow
+theme      = amber       # color amber green white blue red yellow c64 vic20 c128 borland custom
 cursor     = block       # block | underline
 local_echo = off         # on | off
+fg_color   = #FFFFFF     # custom-theme foreground (used when theme = custom)
+bg_color   = #000000     # custom-theme background
 font       =             # empty = DejaVu (default), a bundled name, or an absolute .ttf path
 ```
+
+Themes: `color` is the full 16-colour ANSI palette; `amber`/`green`/`white`/
+`blue`/`red`/`yellow` are monochrome phosphor looks; `c64`, `vic20`, `c128`, and
+`borland` are retro machine palettes (text colour on a screen background); and
+`custom` uses `fg_color`/`bg_color`. Retro/custom themes are two-colour — every
+ANSI colour maps to a shade between background and foreground — so colourful
+TUIs render monochrome under them (as with the phosphor themes). There's no
+separate border colour: the grid fills the whole screen.
 
 Eight fonts are bundled in `assets/` so they work on a bare Pi OS Lite: DejaVu
 Sans Mono (default), Liberation Mono, Noto Sans Mono, Hack, JetBrains Mono, Fira

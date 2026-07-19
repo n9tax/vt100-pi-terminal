@@ -49,7 +49,8 @@ void textmode_set_blink(int on);
 void textmode_set_screen_reverse(int on);
 
 // Runtime display settings.
-void textmode_set_theme(int theme);          // THEME_* ; re-renders all
+void textmode_set_theme(int theme);          // themes.c index; re-renders all
+void textmode_set_custom_colors(uint32_t fg, uint32_t bg);  // for the "custom" theme
 void textmode_set_cursor_style(int style);   // 0 = block, 1 = underline
 void textmode_set_flash(int on);             // visual bell: invert everything
 

@@ -6,12 +6,15 @@
 #include "settings.h"
 #include "video/textmode.h"
 #include "video/fonts.h"
+#include "video/themes.h"
 #include "io/serial_linux.h"
 
 #include <string.h>
 #include <stdio.h>
 
-enum { F_SERIAL, F_BAUD, F_THEME, F_CURSOR, F_ECHO, F_FONT, NFIELDS };
+enum { F_SERIAL, F_BAUD, F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_FONT, NFIELDS };
+
+static int is_text_field(int i) { return i == F_SERIAL || i == F_FG || i == F_BG; }
 
 static int active;
 static int sel;
@@ -37,6 +40,8 @@ static void field_value(int i, char *out, size_t n) {
         case F_SERIAL: snprintf(out, n, "%s", work.serial_dev); break;
         case F_BAUD:   snprintf(out, n, "%d", work.baud); break;
         case F_THEME:  snprintf(out, n, "%s", settings_theme_name(work.theme)); break;
+        case F_FG:     snprintf(out, n, "%s", work.fg_hex); break;
+        case F_BG:     snprintf(out, n, "%s", work.bg_hex); break;
         case F_CURSOR: snprintf(out, n, "%s", work.cursor_style ? "underline" : "block"); break;
         case F_ECHO:   snprintf(out, n, "%s", work.local_echo ? "on" : "off"); break;
         case F_FONT: {
@@ -51,7 +56,8 @@ static void field_value(int i, char *out, size_t n) {
 
 static void draw(void) {
     static const char *labels[NFIELDS] = {
-        "Serial device", "Baud rate", "Theme", "Cursor", "Local echo", "Font",
+        "Serial device", "Baud rate", "Theme", "Custom FG", "Custom BG",
+        "Cursor", "Local echo", "Font",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
@@ -65,7 +71,7 @@ static void draw(void) {
         int selrow = (i == sel);
         char val[300];
         field_value(i, val, sizeof val);
-        if (selrow && i == F_SERIAL) {
+        if (selrow && is_text_field(i)) {
             size_t l = strlen(val);
             if (l + 1 < sizeof val) { val[l] = '_'; val[l + 1] = '\0'; }   // edit caret
         }
@@ -93,7 +99,7 @@ static void change(int d) {
             work.baud = bauds[idx];
             break;
         }
-        case F_THEME:  work.theme = (work.theme + d + THEME_COUNT) % THEME_COUNT; break;
+        case F_THEME:  { int nt = themes_count(); work.theme = (work.theme + d + nt) % nt; break; }
         case F_CURSOR: work.cursor_style ^= 1; break;
         case F_ECHO:   work.local_echo ^= 1; break;
         case F_FONT: {
@@ -108,9 +114,14 @@ static void change(int d) {
     }
 }
 
-static void edit_text(uint8_t b) {   // only the Serial device field is typed
-    char  *buf = work.serial_dev;
-    size_t cap = sizeof work.serial_dev;
+static void edit_text(uint8_t b) {   // the typed fields: serial device, custom fg/bg
+    char  *buf;
+    size_t cap;
+    switch (sel) {
+        case F_FG: buf = work.fg_hex; cap = sizeof work.fg_hex; break;
+        case F_BG: buf = work.bg_hex; cap = sizeof work.bg_hex; break;
+        default:   buf = work.serial_dev; cap = sizeof work.serial_dev; break;
+    }
     size_t n = strlen(buf);
     if ((b == 0x7f || b == 0x08) && n > 0) buf[n - 1] = '\0';           // backspace
     else if (b >= 0x20 && b < 0x7f && n + 1 < cap) { buf[n] = (char)b; buf[n + 1] = '\0'; }
@@ -127,6 +138,7 @@ static void do_save(void) {
 
     // Apply live. Theme/cursor are trivial; serial reopen and font rebuild only
     // when they actually changed.
+    textmode_set_custom_colors(settings_parse_hex(work.fg_hex), settings_parse_hex(work.bg_hex));
     textmode_set_theme(work.theme);
     textmode_set_cursor_style(work.cursor_style);
     if (strcmp(work.serial_dev, orig.serial_dev) != 0 || work.baud != orig.baud)
@@ -177,6 +189,6 @@ void setup_feed(uint8_t b) {
     if (b == '\r' || b == '\n') { do_save(); return; }
     if (b == '\t') { move_sel(+1); draw(); return; }
 
-    if (sel == F_SERIAL) edit_text(b);
+    if (is_text_field(sel)) edit_text(b);
     draw();
 }
