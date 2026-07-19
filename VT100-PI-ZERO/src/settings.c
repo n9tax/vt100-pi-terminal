@@ -35,7 +35,8 @@ static const char *DEFAULT_FILE =
     "local_echo = off        # on | off  (a real terminal leaves this off; the host echoes)\n"
     "\n"
     "# ---- Font ----\n"
-    "# empty = bundled DejaVu Sans Mono (or a system DejaVu); or an absolute .ttf path.\n"
+    "# empty = DejaVu Sans Mono (default). Or a bundled name: Liberation Mono,\n"
+    "# Noto Sans Mono. Or an absolute path to any .ttf. (Setup/Ctrl+F3 cycles these.)\n"
     "font       =\n";
 
 // ---- small helpers ---------------------------------------------------------
@@ -190,7 +191,8 @@ void settings_save(void) {
         "local_echo = %s        # on | off\n"
         "\n"
         "# ---- Font ----\n"
-        "# empty = bundled DejaVu Sans Mono (or a system DejaVu); or an absolute .ttf path.\n"
+        "# empty = DejaVu Sans Mono (default). Or a bundled name: Liberation Mono,\n"
+        "# Noto Sans Mono. Or an absolute path to any .ttf. (Setup/Ctrl+F3 cycles these.)\n"
         "font       = %s\n",
         g_settings.serial_dev, g_settings.baud, settings_theme_name(g_settings.theme),
         g_settings.cursor_style ? "underline" : "block",

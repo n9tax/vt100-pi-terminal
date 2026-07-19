@@ -5,6 +5,7 @@
 #include "config.h"
 #include "settings.h"
 #include "video/textmode.h"
+#include "video/fonts.h"
 #include "io/serial_linux.h"
 
 #include <string.h>
@@ -38,7 +39,12 @@ static void field_value(int i, char *out, size_t n) {
         case F_THEME:  snprintf(out, n, "%s", settings_theme_name(work.theme)); break;
         case F_CURSOR: snprintf(out, n, "%s", work.cursor_style ? "underline" : "block"); break;
         case F_ECHO:   snprintf(out, n, "%s", work.local_echo ? "on" : "off"); break;
-        case F_FONT:   snprintf(out, n, "%s", work.font_path[0] ? work.font_path : "(bundled default)"); break;
+        case F_FONT: {
+            int idx = fonts_index_of(work.font_path);
+            if (idx >= 0) snprintf(out, n, "%s", fonts_name(idx));
+            else          snprintf(out, n, "%s (custom)", work.font_path);
+            break;
+        }
         default:       out[0] = '\0'; break;
     }
 }
@@ -59,7 +65,7 @@ static void draw(void) {
         int selrow = (i == sel);
         char val[300];
         field_value(i, val, sizeof val);
-        if (selrow && (i == F_SERIAL || i == F_FONT)) {
+        if (selrow && i == F_SERIAL) {
             size_t l = strlen(val);
             if (l + 1 < sizeof val) { val[l] = '_'; val[l + 1] = '\0'; }   // edit caret
         }
@@ -69,7 +75,7 @@ static void draw(void) {
     }
 
     put(TERM_ROWS - 4, 4, "Up/Down: field    Left/Right: change value", 7, 0, 0);
-    put(TERM_ROWS - 3, 4, "Type to edit text fields, Backspace deletes", 7, 0, 0);
+    put(TERM_ROWS - 3, 4, "Serial device is typed (Backspace deletes)", 7, 0, 0);
     put(TERM_ROWS - 2, 4, "Enter: save & apply     Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
 
     textmode_render_all();
@@ -90,13 +96,21 @@ static void change(int d) {
         case F_THEME:  work.theme = (work.theme + d + THEME_COUNT) % THEME_COUNT; break;
         case F_CURSOR: work.cursor_style ^= 1; break;
         case F_ECHO:   work.local_echo ^= 1; break;
+        case F_FONT: {
+            int n = fonts_count();
+            int idx = fonts_index_of(work.font_path);
+            if (idx < 0) idx = 0;   // a custom path: cycling drops into the list
+            idx = (idx + d + n) % n;
+            snprintf(work.font_path, sizeof work.font_path, "%s", fonts_value(idx));
+            break;
+        }
         default: break;   // text fields: nothing to cycle
     }
 }
 
-static void edit_text(uint8_t b) {
-    char  *buf = (sel == F_SERIAL) ? work.serial_dev : work.font_path;
-    size_t cap = (sel == F_SERIAL) ? sizeof work.serial_dev : sizeof work.font_path;
+static void edit_text(uint8_t b) {   // only the Serial device field is typed
+    char  *buf = work.serial_dev;
+    size_t cap = sizeof work.serial_dev;
     size_t n = strlen(buf);
     if ((b == 0x7f || b == 0x08) && n > 0) buf[n - 1] = '\0';           // backspace
     else if (b >= 0x20 && b < 0x7f && n + 1 < cap) { buf[n] = (char)b; buf[n + 1] = '\0'; }
@@ -163,6 +177,6 @@ void setup_feed(uint8_t b) {
     if (b == '\r' || b == '\n') { do_save(); return; }
     if (b == '\t') { move_sel(+1); draw(); return; }
 
-    if (sel == F_SERIAL || sel == F_FONT) edit_text(b);
+    if (sel == F_SERIAL) edit_text(b);
     draw();
 }

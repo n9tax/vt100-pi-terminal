@@ -60,8 +60,12 @@ baud       = 9600        # 300 1200 2400 4800 9600 19200 38400 57600 115200
 theme      = amber       # color amber green white blue red yellow
 cursor     = block       # block | underline
 local_echo = off         # on | off
-font       =             # empty = bundled DejaVu Sans Mono, or an absolute .ttf path
+font       =             # empty = DejaVu; "Liberation Mono"; "Noto Sans Mono"; or an absolute .ttf path
 ```
+
+Fonts are bundled in `assets/` (DejaVu Sans Mono, Liberation Mono, Noto Sans
+Mono) so they work on a bare Pi OS Lite; the Setup menu's Font field cycles
+through them, or point `font` at any `.ttf` on disk.
 
 Unknown keys are ignored (with a warning on stderr); a missing file is
 recreated with defaults.
@@ -77,6 +81,8 @@ live — no restart.
 
 ```
 sudo cp build/vt100-pi-zero /usr/local/bin/vt100-pi-zero
+sudo mkdir -p /usr/local/share/vt100-pi/fonts
+sudo cp assets/*.ttf /usr/local/share/vt100-pi/fonts/   # so bundled fonts resolve off-tree
 sudo cp systemd/vt100-pi.service /etc/systemd/system/
 sudo systemctl disable getty@tty1.service
 sudo systemctl enable --now vt100-pi.service

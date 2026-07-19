@@ -22,6 +22,7 @@ add_executable(vt100-pi-zero
         src/terminal/vt100.c
         src/video/textmode.c
         src/video/glyphs.c
+        src/video/fonts.c
         src/io/serial_linux.c
         src/io/kbd_evdev.c
         src/io/host_link.c
@@ -36,7 +37,8 @@ target_compile_options(vt100-pi-zero PRIVATE -Wall -Wextra ${DRM_CFLAGS_OTHER} $
 target_link_libraries(vt100-pi-zero PRIVATE ${DRM_LIBRARIES} ${FREETYPE_LIBRARIES})
 target_link_directories(vt100-pi-zero PRIVATE ${DRM_LIBRARY_DIRS} ${FREETYPE_LIBRARY_DIRS})
 
-# Compile-in the path to the bundled TTF so the binary finds it when run from
-# the build tree; glyphs.c also falls back to FONT_TTF_PATH and system fonts.
+# Compile-in the bundled font locations so the binary finds them when run from
+# the build tree; fonts.c/glyphs.c also fall back to install and system dirs.
 target_compile_definitions(vt100-pi-zero PRIVATE
+        ASSET_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
         ASSET_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/assets/DejaVuSansMono.ttf")

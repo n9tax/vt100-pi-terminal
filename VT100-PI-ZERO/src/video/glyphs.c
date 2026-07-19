@@ -2,6 +2,7 @@
 // an 8-bit coverage cell, squeezed to the display's cell aspect (so 80 columns
 // fill the width) and vertically centred on the font's baseline.
 #include "video/glyphs.h"
+#include "video/fonts.h"
 #include "config.h"
 #include "settings.h"
 
@@ -131,8 +132,12 @@ static int render_special(int code, uint8_t *cell) {
 
 // ---- font discovery --------------------------------------------------------
 static const char *find_font(void) {
+    // The registry resolves "" (default), a bundled name, or an absolute path.
+    const char *r = fonts_resolve(g_settings.font_path);
+    if (r) return r;
+
+    // Legacy fallbacks if the registry couldn't locate anything.
     static const char *cands[] = {
-        g_settings.font_path,  // runtime override (settings file), "" if unset
         FONT_TTF_PATH,         // compile-time override (config.h), "" if unset
         ASSET_FONT_PATH,       // bundled DejaVuSansMono.ttf (compiled-in source path)
         "/usr/local/share/vt100-pi/font.ttf",
