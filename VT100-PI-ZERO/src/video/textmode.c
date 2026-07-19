@@ -60,7 +60,8 @@ static int line_h = 16;             // nominal row height in px (fb_height/ROWS)
 static int headroom = 0;            // px of spare above content for outgoing rows (MAXPEND*line_h)
 static int base_y = 0;             // tall-buffer y of the live content's top row
 static int tall_h = 0;              // total tall buffer height (px)
-static int base_step = 10;          // min pan px/frame (the configured glide speed)
+static int base_step = 1280;        // pan speed in px/frame * 256 (fixed-point, sub-pixel)
+static int step_acc = 0;            // fractional-pixel accumulator for base_step
 static int d = 0;                   // pixels left to settle (>0 = a slide in flight)
 static int backlog_lines = 0;       // lines still buffered in the serial ring (look-ahead)
 static int exact_rows = 1;          // 1 when line_h*ROWS == fb_height (no scroll drift)
@@ -345,7 +346,7 @@ int textmode_smooth_enabled(void) { return smooth_on; }
 
 void textmode_set_smooth(int on, int pps) {
     smooth_on = on ? 1 : 0;
-    if (pps > 0) { base_step = pps / 60; if (base_step < 1) base_step = 1; }
+    if (pps > 0) { base_step = pps * 256 / 60; if (base_step < 1) base_step = 1; }  // px/frame * 256
     if (!smooth_on) textmode_scroll_snap();
 }
 
@@ -378,15 +379,19 @@ void textmode_smooth_line(void) {
 }
 
 void textmode_scroll_tick(void) {
-    if (d <= 0) return;
+    if (d <= 0) { step_acc = 0; return; }
 
     // Constant speed for a calm, consistent scroll -- blocks of text (a listing, a
     // program's output, paging in an editor) read best at a steady rate. Output
     // that outruns it isn't chased with a speed-up; instead the buffer dumps and
     // resets (see the main loop), the way a real terminal overruns and catches up.
-    int step = base_step;
+    // base_step is px/frame * 256; the accumulator carries the sub-pixel remainder
+    // so speeds like 225 or 275 px/s (3.75 / 4.58 px/frame) are distinct.
+    step_acc += base_step;
+    int step = step_acc >> 8;
+    step_acc &= 0xff;
+    if (step <= 0) return;         // sub-pixel frame: nothing to move yet
     if (step > d) step = d;
-    if (step < 1) step = 1;
 
     d -= step;
     if (d <= 0) {
