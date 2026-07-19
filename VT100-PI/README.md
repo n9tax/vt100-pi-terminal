@@ -76,7 +76,6 @@ decoded keystrokes to core0 over a lock-free queue. Host bytes flow
 `vt100.c` (dispatch) → `screen.c` (cursor/SGR/scroll semantics) →
 `textmode.c` (cell grid) → `hstx_dvi.c` (DMA scanout).
 
-For the full module-by-module breakdown, cross-cutting hazards (DMA channel
-ownership, the flash-write core1 lockout, the DVI watchdog's rate-deviation
-logic), see the repo's `CLAUDE.md` (not tracked in git — it's Claude Code's
-working notes, regenerate it locally with `/init` if you want it).
+The cross-cutting hazards worth knowing before touching this code: DMA channel
+ownership across the two cores, the core1 lockout during flash writes, and the
+DVI watchdog's rate-deviation logic.
