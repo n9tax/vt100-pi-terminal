@@ -61,6 +61,7 @@ static int d = 0;                   // pixels left to settle (>0 = a slide in fl
 static int pending = 0;             // rows currently stacked above the content
 static int backlog_lines = 0;       // lines still buffered in the serial ring (look-ahead)
 static int exact_rows = 1;          // 1 when line_h*ROWS == fb_height (no scroll drift)
+static int cur_step = 0;            // eased pan speed (px/frame) for smooth acceleration
 
 // ---- palette ---------------------------------------------------------------
 // Fixed high-contrast palette for the Setup menu ("chrome"), so a bad terminal
@@ -375,7 +376,7 @@ void textmode_smooth_line(void) {
 }
 
 void textmode_scroll_tick(void) {
-    if (d <= 0) return;
+    if (d <= 0) { cur_step = base_step; return; }
 
     // Speed is driven by how far behind the host we are: the lines still waiting
     // in the serial ring (backlog_lines, known ahead of time) plus what's on
@@ -383,10 +384,17 @@ void textmode_scroll_tick(void) {
     // near-empty one glides -- the buffer lets us match the data rate predictively
     // rather than reacting after a pile-up. Floor = configured glide speed.
     int behind_px = backlog_lines * line_h + d;
-    int step = base_step + (behind_px - line_h) / 6;
-    if (step < base_step) step = base_step;
+    int target = base_step + (behind_px - line_h) / 6;
+    if (target < base_step) target = base_step;
     int maxstep = 4 * line_h;
-    if (step > maxstep) step = maxstep;
+    if (target > maxstep) target = maxstep;
+
+    // Ease toward the target so the speed ramps smoothly (no abrupt jerk when a
+    // burst arrives or drains).
+    cur_step += (target - cur_step) / 4;
+    if (cur_step < base_step) cur_step = base_step;
+
+    int step = cur_step;
     if (step > d) step = d;
     if (step < 1) step = 1;
 

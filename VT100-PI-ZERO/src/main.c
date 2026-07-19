@@ -161,9 +161,10 @@ int main(void) {
                 }
             }
             if (kn) serial_write(kb, (uint32_t)kn);
-            // Don't paint the cursor mid-slide: the pan would smear it up the
-            // screen. It's restored once the slide settles (below).
-            if (activity && !textmode_scroll_busy()) screen_show_cursor();
+            // Only paint the cursor when fully caught up (not mid-slide and nothing
+            // buffered) -- otherwise it flickers/scans along the bottom row during
+            // continuous scrolling.
+            if (activity && !textmode_scroll_busy() && inbuf_empty()) screen_show_cursor();
 
             // Visual bell (no audible-bell hardware on this board).
             if (vt100_take_bell()) {
@@ -176,8 +177,8 @@ int main(void) {
         // slide is paced to the display, not the CPU loop).
         if (!booting && !setup_active() && !textmode_flip_pending()) {
             textmode_scroll_tick();
-            if (was_scrolling && !textmode_scroll_busy())
-                screen_show_cursor();            // slide settled: restore the cursor
+            if (was_scrolling && !textmode_scroll_busy() && inbuf_empty())
+                screen_show_cursor();            // fully caught up: restore the cursor
             was_scrolling = textmode_scroll_busy();
         }
 
