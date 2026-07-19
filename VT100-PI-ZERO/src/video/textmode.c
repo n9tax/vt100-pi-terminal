@@ -56,9 +56,11 @@ static int smooth_on = 0;           // enabled by settings
 static int line_h = 16;             // nominal row height in px (fb_height/ROWS)
 static int content_y0 = 0;          // tall-buffer y where the live content starts
 static int tall_h = 0;              // tall buffer height = content_y0 + fb_height
-static int base_step = 10;          // pan px/frame at the configured speed
+static int base_step = 10;          // min pan px/frame (the configured glide speed)
 static int d = 0;                   // pixels left to settle (>0 = a slide in flight)
 static int pending = 0;             // rows currently stacked above the content
+static int scroll_input = 0;        // host line-scrolls since last tick (rate estimate)
+static int rate_est = 0;            // smoothed input rate, px/frame * 256 (feed-forward)
 
 // ---- palette ---------------------------------------------------------------
 // Fixed high-contrast palette for the Setup menu ("chrome"), so a bad terminal
@@ -341,6 +343,7 @@ void textmode_set_smooth(int on, int pps) {
 
 void textmode_smooth_line(void) {
     if (!smooth_on) { textmode_render_all(); return; }
+    scroll_input++;   // feeds the rate estimate in scroll_tick
 
     // More than MAXPEND rows stacked can't fit the spare region: jump.
     if (pending >= MAXPEND) { d = 0; pending = 0; textmode_render_all(); return; }
@@ -370,15 +373,21 @@ void textmode_smooth_line(void) {
 }
 
 void textmode_scroll_tick(void) {
+    // Smoothed estimate of the host's scroll rate (px/frame, *256), updated every
+    // tick so it decays back down after a burst. This is the feed-forward term.
+    int input_px = scroll_input * line_h;
+    scroll_input = 0;
+    rate_est += (input_px * 256 - rate_est) / 8;   // EMA, alpha = 1/8
+
     if (d <= 0) return;
 
-    // Base speed for a lone line; ramp up gently as the backlog grows so fast
-    // output (short lines arriving quicker than one slide) keeps up with
-    // continuous motion instead of piling up and jumping. Capped so it stays a
-    // visible slide, not a jump.
-    int step = base_step;
-    if (d > line_h) step += (d - line_h) / 4;
-    int maxstep = 3 * line_h;
+    // Rate controller (PI): pan at the estimated input rate (so the scroll tracks
+    // how fast text is arriving) plus a gentle correction to hold the backlog near
+    // one line. Fast output scrolls faster, slow output glides -- continuously,
+    // without piling up to a jump. Never slower than the configured glide speed.
+    int step = rate_est / 256 + (d - line_h) / 8;
+    if (step < base_step) step = base_step;
+    int maxstep = 4 * line_h;
     if (step > maxstep) step = maxstep;
     if (step > d) step = d;
     if (step < 1) step = 1;
