@@ -51,7 +51,7 @@ static int blink_phase = 0;
 // The live content is rendered into a fixed region of a taller buffer; rows that
 // scroll off are stacked just above it, and present() copies a display-sized
 // window that pans across them. See textmode_smooth_line().
-#define MAXPEND 8                   // max rows that can slide at once; beyond -> jump
+#define MAXPEND 16                  // max rows that can slide at once; beyond -> jump
 static int smooth_on = 0;           // enabled by settings
 static int line_h = 16;             // nominal row height in px (fb_height/ROWS)
 static int content_y0 = 0;          // tall-buffer y where the live content starts
@@ -364,9 +364,18 @@ void textmode_smooth_line(void) {
 
 void textmode_scroll_tick(void) {
     if (d <= 0) return;
-    int step = base_step;          // constant speed for uniform motion
+
+    // Base speed for a lone line; ramp up gently as the backlog grows so fast
+    // output (short lines arriving quicker than one slide) keeps up with
+    // continuous motion instead of piling up and jumping. Capped so it stays a
+    // visible slide, not a jump.
+    int step = base_step;
+    if (d > line_h) step += (d - line_h) / 4;
+    int maxstep = 3 * line_h;
+    if (step > maxstep) step = maxstep;
     if (step > d) step = d;
     if (step < 1) step = 1;
+
     d -= step;
     if (d <= 0) { d = 0; pending = 0; }   // settled; stacked rows are now off-window
     dirty = 1;                     // the window moved, so re-present
