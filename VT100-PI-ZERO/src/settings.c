@@ -35,8 +35,9 @@ static const char *DEFAULT_FILE =
     "local_echo = off        # on | off  (a real terminal leaves this off; the host echoes)\n"
     "\n"
     "# ---- Font ----\n"
-    "# empty = DejaVu Sans Mono (default). Or a bundled name: Liberation Mono,\n"
-    "# Noto Sans Mono. Or an absolute path to any .ttf. (Setup/Ctrl+F3 cycles these.)\n"
+    "# empty = DejaVu (default). Or a bundled name: Liberation Mono, Noto Sans Mono,\n"
+    "# Hack, JetBrains Mono, Fira Code, Source Code Pro, VT323. Or an absolute .ttf\n"
+    "# path. Setup (Ctrl+F3) cycles the bundled fonts; see assets/FONTS.md.\n"
     "font       =\n";
 
 // ---- small helpers ---------------------------------------------------------

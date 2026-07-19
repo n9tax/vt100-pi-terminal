@@ -60,12 +60,14 @@ baud       = 9600        # 300 1200 2400 4800 9600 19200 38400 57600 115200
 theme      = amber       # color amber green white blue red yellow
 cursor     = block       # block | underline
 local_echo = off         # on | off
-font       =             # empty = DejaVu; "Liberation Mono"; "Noto Sans Mono"; or an absolute .ttf path
+font       =             # empty = DejaVu (default), a bundled name, or an absolute .ttf path
 ```
 
-Fonts are bundled in `assets/` (DejaVu Sans Mono, Liberation Mono, Noto Sans
-Mono) so they work on a bare Pi OS Lite; the Setup menu's Font field cycles
-through them, or point `font` at any `.ttf` on disk.
+Eight fonts are bundled in `assets/` so they work on a bare Pi OS Lite: DejaVu
+Sans Mono (default), Liberation Mono, Noto Sans Mono, Hack, JetBrains Mono, Fira
+Code, Source Code Pro, and VT323 (a retro DEC-style face). The Setup menu's Font
+field cycles through them, or point `font` at any `.ttf` on disk. Licenses and
+sources are in [assets/FONTS.md](assets/FONTS.md).
 
 Unknown keys are ignored (with a warning on stderr); a missing file is
 recreated with defaults.

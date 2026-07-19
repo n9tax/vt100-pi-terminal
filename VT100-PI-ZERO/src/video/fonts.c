@@ -21,6 +21,11 @@ typedef struct { const char *name; const char *file; } entry;
 static const entry EXTRA[] = {
     { "Liberation Mono", "LiberationMono-Regular.ttf" },
     { "Noto Sans Mono",  "NotoSansMono-Regular.ttf" },
+    { "Hack",            "Hack-Regular.ttf" },
+    { "JetBrains Mono",  "JetBrainsMono-Regular.ttf" },
+    { "Fira Code",       "FiraCode-Regular.ttf" },
+    { "Source Code Pro", "SourceCodePro-Regular.ttf" },
+    { "VT323",           "VT323-Regular.ttf" },
 };
 #define NEXTRA ((int)(sizeof EXTRA / sizeof EXTRA[0]))
 
