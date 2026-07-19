@@ -387,15 +387,15 @@ void textmode_scroll_tick(void) {
     // near-empty one glides -- the buffer lets us match the data rate predictively
     // rather than reacting after a pile-up. Floor = configured glide speed.
     int behind_px = backlog_lines * line_h + d;
-    int target = base_step + (behind_px - line_h) / 6;
+    int target = base_step + (behind_px - line_h) / 10;
     if (target < base_step) target = base_step;
-    int maxstep = 4 * line_h;
+    int maxstep = 2 * line_h;   // <= ~2 rows/frame: plenty for 9600 baud, gentle catch-up
     if (target > maxstep) target = maxstep;
 
     // Ease toward the target so the speed ramps smoothly (rounding away from zero
-    // so a small difference still moves -- integer /4 alone would stick).
-    if (cur_step < target)      cur_step += (target - cur_step + 3) / 4;
-    else if (cur_step > target) cur_step -= (cur_step - target + 3) / 4;
+    // so a small difference still moves -- integer /6 alone would stick).
+    if (cur_step < target)      cur_step += (target - cur_step + 5) / 6;
+    else if (cur_step > target) cur_step -= (cur_step - target + 5) / 6;
     if (cur_step < base_step) cur_step = base_step;
 
     int step = cur_step;
