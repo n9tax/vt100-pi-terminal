@@ -56,12 +56,12 @@ static long long now_ms(void) {
 // bytes land here, then are metered into vt100_feed() so smooth scroll can slide
 // cleanly and read the buffered line count as look-ahead for its speed.
 #define INBUF_SIZE 65536
+#define DUMP_LINES 40           // buffered lines past which we dump-and-reset (overrun)
 static uint8_t inbuf[INBUF_SIZE];
 static int inbuf_head, inbuf_tail;
 static int inbuf_nl;                 // running count of buffered newlines (look-ahead)
 
 static int  inbuf_empty(void) { return inbuf_head == inbuf_tail; }
-static int  inbuf_count(void) { return (inbuf_head - inbuf_tail + INBUF_SIZE) % INBUF_SIZE; }
 static int  inbuf_pending_lines(void) { return inbuf_nl; }
 static void inbuf_push(uint8_t b) {
     int next = (inbuf_head + 1) % INBUF_SIZE;
@@ -140,14 +140,22 @@ int main(void) {
             int c;
             while ((c = serial_getc()) >= 0) inbuf_push((uint8_t)c);
 
-            // Tell the scroll controller how many lines are waiting (look-ahead),
-            // then feed the terminal from the ring -- paced so at most ~2 lines
-            // slide at once (textmode_feed_room), the ring absorbing the burst. If
-            // the ring gets very deep, stop pacing and drain it to bound the lag.
+            // Feed the terminal from the ring. Normally paced so at most ~2 lines
+            // slide at once and the ring absorbs the burst; but once more than
+            // DUMP_LINES are buffered the scroll can't keep up at a constant speed,
+            // so dump the whole ring and let it reset (like a real terminal
+            // overrunning) rather than lag seconds behind.
             textmode_set_backlog(inbuf_pending_lines());
-            while (!inbuf_empty() && (textmode_feed_room() || inbuf_count() > INBUF_SIZE / 2)) {
-                if (!activity) { screen_hide_cursor(); activity = 1; cur_shown = 0; }
-                vt100_feed((uint8_t)inbuf_pop());
+            if (inbuf_pending_lines() > DUMP_LINES) {
+                while (!inbuf_empty()) {
+                    if (!activity) { screen_hide_cursor(); activity = 1; cur_shown = 0; }
+                    vt100_feed((uint8_t)inbuf_pop());
+                }
+            } else {
+                while (!inbuf_empty() && textmode_feed_room()) {
+                    if (!activity) { screen_hide_cursor(); activity = 1; cur_shown = 0; }
+                    vt100_feed((uint8_t)inbuf_pop());
+                }
             }
             textmode_set_backlog(inbuf_pending_lines());
 

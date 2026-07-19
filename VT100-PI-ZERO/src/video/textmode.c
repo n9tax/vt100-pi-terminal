@@ -64,7 +64,6 @@ static int base_step = 10;          // min pan px/frame (the configured glide sp
 static int d = 0;                   // pixels left to settle (>0 = a slide in flight)
 static int backlog_lines = 0;       // lines still buffered in the serial ring (look-ahead)
 static int exact_rows = 1;          // 1 when line_h*ROWS == fb_height (no scroll drift)
-static int cur_step = 0;            // eased pan speed (px/frame) for smooth acceleration
 
 // ---- palette ---------------------------------------------------------------
 // Fixed high-contrast palette for the Setup menu ("chrome"), so a bad terminal
@@ -379,26 +378,13 @@ void textmode_smooth_line(void) {
 }
 
 void textmode_scroll_tick(void) {
-    if (d <= 0) { cur_step = base_step; return; }
+    if (d <= 0) return;
 
-    // Speed is driven by how far behind the host we are: the lines still waiting
-    // in the serial ring (backlog_lines, known ahead of time) plus what's on
-    // screen mid-slide (d). Pan proportionally so a deep buffer scrolls fast and a
-    // near-empty one glides -- the buffer lets us match the data rate predictively
-    // rather than reacting after a pile-up. Floor = configured glide speed.
-    int behind_px = backlog_lines * line_h + d;
-    int target = base_step + (behind_px - line_h) / 10;
-    if (target < base_step) target = base_step;
-    int maxstep = 2 * line_h;   // <= ~2 rows/frame: plenty for 9600 baud, gentle catch-up
-    if (target > maxstep) target = maxstep;
-
-    // Ease toward the target so the speed ramps smoothly (rounding away from zero
-    // so a small difference still moves -- integer /6 alone would stick).
-    if (cur_step < target)      cur_step += (target - cur_step + 5) / 6;
-    else if (cur_step > target) cur_step -= (cur_step - target + 5) / 6;
-    if (cur_step < base_step) cur_step = base_step;
-
-    int step = cur_step;
+    // Constant speed for a calm, consistent scroll -- blocks of text (a listing, a
+    // program's output, paging in an editor) read best at a steady rate. Output
+    // that outruns it isn't chased with a speed-up; instead the buffer dumps and
+    // resets (see the main loop), the way a real terminal overruns and catches up.
+    int step = base_step;
     if (step > d) step = d;
     if (step < 1) step = 1;
 
