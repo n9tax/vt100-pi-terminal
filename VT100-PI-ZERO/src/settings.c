@@ -31,7 +31,8 @@ static const char *DEFAULT_FILE =
     "baud       = " STR(SERIAL_BAUD) "   # 300 1200 2400 4800 9600 19200 38400 57600 115200\n"
     "\n"
     "# ---- Network host link ----\n"
-    "# If telnet_host is set, connect over Telnet on boot instead of serial.\n"
+    "# Connect on boot instead of serial. ssh_host wins over telnet_host.\n"
+    "ssh_host    =           # host or user@host (uses the system ssh client)\n"
     "telnet_host =\n"
     "telnet_port = 23\n"
     "\n"
@@ -89,6 +90,7 @@ static void set_defaults(void) {
     g_settings.scroll_speed = SCROLL_SPEED_DEFAULT;
     snprintf(g_settings.telnet_host, sizeof g_settings.telnet_host, "%s", TELNET_HOST_DEFAULT);
     g_settings.telnet_port = TELNET_PORT_DEFAULT;
+    snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", SSH_HOST_DEFAULT);
 }
 
 static void resolve_path(void) {
@@ -138,6 +140,7 @@ static void apply(const char *key, const char *val) {
     else if (!strcasecmp(key, "scroll_speed"))  g_settings.scroll_speed = atoi(val);
     else if (!strcasecmp(key, "telnet_host"))   snprintf(g_settings.telnet_host, sizeof g_settings.telnet_host, "%s", val);
     else if (!strcasecmp(key, "telnet_port"))   g_settings.telnet_port = atoi(val);
+    else if (!strcasecmp(key, "ssh_host"))      snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", val);
     else fprintf(stderr, "settings: ignoring unknown key '%s'\n", key);
 }
 
@@ -209,7 +212,8 @@ void settings_save(void) {
         "baud       = %d   # 300 1200 2400 4800 9600 19200 38400 57600 115200\n"
         "\n"
         "# ---- Network host link ----\n"
-        "# If telnet_host is set, connect over Telnet on boot instead of serial.\n"
+        "# Connect on boot instead of serial. ssh_host wins over telnet_host.\n"
+        "ssh_host    = %s\n"
         "telnet_host = %s\n"
         "telnet_port = %d\n"
         "\n"
@@ -231,7 +235,7 @@ void settings_save(void) {
         "# path. Setup (Ctrl+F3) cycles the bundled fonts; see assets/FONTS.md.\n"
         "font       = %s\n",
         g_settings.serial_dev, g_settings.baud,
-        g_settings.telnet_host, g_settings.telnet_port,
+        g_settings.ssh_host, g_settings.telnet_host, g_settings.telnet_port,
         settings_theme_name(g_settings.theme),
         g_settings.cursor_style ? "underline" : "block",
         g_settings.local_echo ? "on" : "off",

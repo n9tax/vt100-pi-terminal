@@ -20,6 +20,7 @@ typedef struct {
     int  scroll_speed;      // pixels/second
     char telnet_host[128];  // "" = use serial; else connect Telnet on boot
     int  telnet_port;       // default 23
+    char ssh_host[128];     // "" = none; else "host"/"user@host", connect ssh on boot
 } settings_t;
 
 extern settings_t g_settings;

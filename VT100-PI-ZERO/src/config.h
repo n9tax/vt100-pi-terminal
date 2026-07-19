@@ -50,8 +50,10 @@
 #define SCROLL_SPEED_DEFAULT  300
 
 // ---- Network host link ------------------------------------------------------
-// Optional Telnet destination. If telnet_host is set, the terminal connects over
-// TCP on boot instead of using the serial link. Empty = serial.
+// Optional network destination connected on boot instead of the serial link
+// (ssh_host takes precedence over telnet_host; empty both = serial).
+// ssh_host is "host" or "user@host"; telnet_host is a hostname/IP.
+#define SSH_HOST_DEFAULT    ""
 #define TELNET_HOST_DEFAULT ""
 #define TELNET_PORT_DEFAULT 23
 

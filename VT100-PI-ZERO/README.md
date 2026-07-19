@@ -65,13 +65,16 @@ scroll_speed  = 600      # pixels/second (a line is ~32px; bursts catch up)
 fg_color   = #FFFFFF     # custom-theme foreground (used when theme = custom)
 bg_color   = #000000     # custom-theme background
 font       =             # empty = DejaVu (default), a bundled name, or an absolute .ttf path
-telnet_host =            # set to connect over Telnet on boot instead of serial
+ssh_host    =            # host or user@host: connect via the system ssh on boot
+telnet_host =            # hostname/IP: connect over Telnet on boot
 telnet_port = 23
 ```
 
-Set `telnet_host` to a hostname/IP and the terminal connects to it over Telnet
-on boot (falling back to serial if the connection fails), sending its keystrokes
-to the socket. Leave it empty to use the serial host link.
+Set `ssh_host` (`user@host`) or `telnet_host` and the terminal connects to it on
+boot instead of using serial (`ssh_host` wins if both are set), routing keystrokes
+to the connection and falling back to serial if it fails or drops. SSH runs the
+Pi's own `ssh` client over a PTY, so host-key and password prompts appear in the
+terminal as normal. Leave both empty for the serial host link.
 
 Smooth scroll slides the screen up a few pixels per frame instead of jumping a
 whole line. A single new line glides in over a few frames; when lines pile up it
@@ -174,11 +177,12 @@ stack.
 
 1. **MVP** (done): DRM video + evdev keyboard + RS232 serial, no network,
    no Setup menu.
-2. **Networking**: POSIX-socket Telnet transport (`telnet.c` ports
-   unmodified from VT100-PI — it's already decoupled from its transport via
-   callbacks), then SSH via `posix_openpty` + `fork`/`exec ssh` so the
-   system's own OpenSSH client does the protocol work; the PTY master fd
-   then feeds `vt100_feed()` exactly like the serial/telnet paths do.
+2. **Networking**: **done** — `src/net/telnet.c` (ported IAC filter) +
+   `src/net/netlink.c`, a two-mode transport: a TCP Telnet client, or the
+   system `ssh` client run over a PTY (`posix_openpt` + `fork`/`exec`), its
+   master fd feeding the same ring as serial. Connects on boot from
+   `ssh_host`/`telnet_host` (see Configuration). Still to add: a Setup-menu
+   connect UI so you can pick a host without editing the config.
 3. **Setup menu + settings persistence**: **done** — `src/settings.c` loads
    `~/.config/vt100-pi/vt100.conf`, and `src/setup.c` is the on-screen Ctrl+F3
    menu that edits, applies, and re-saves it live (see Configuration).

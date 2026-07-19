@@ -11,8 +11,13 @@
 void netlink_set_emit(void (*emit)(uint8_t byte));
 
 // Open a Telnet connection to host:port. Returns 0 on success, -1 on failure
-// (name resolution / connect error). Blocking connect with a short timeout.
+// (name resolution / connect error). Non-blocking connect with a 5s timeout.
 int  netlink_connect_telnet(const char *host, int port);
+
+// Run the system `ssh` client to `dest` (host or user@host) over a PTY; the
+// master fd becomes the host link (raw bytes). Returns 0 on success, -1 on
+// failure to spawn. Password/host-key prompts appear in the terminal as usual.
+int  netlink_connect_ssh(const char *dest);
 
 void netlink_close(void);
 int  netlink_connected(void);
