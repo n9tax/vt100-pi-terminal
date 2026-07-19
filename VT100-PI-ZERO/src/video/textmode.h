@@ -67,6 +67,8 @@ void textmode_scroll_tick(void);             // advance the slide one frame (mai
 int  textmode_scroll_busy(void);             // 1 while a slide is in flight
 void textmode_scroll_snap(void);             // finish any slide immediately
 void textmode_set_scroll_pace(int backlog);  // (pacing is derived internally)
+void textmode_set_backlog(int lines);        // lines buffered in the serial ring
+int  textmode_feed_room(void);               // ok to feed another line into the slide
 
 // ---- Double-buffered presentation (vsync page flips) -----------------------
 // Rendering targets an off-screen shadow; textmode_present() copies it to a free
