@@ -48,17 +48,20 @@ static int flash_on = 0;            // visual bell
 static int blink_phase = 0;
 
 // ---- smooth scroll state ---------------------------------------------------
-// The live content is rendered into a fixed region of a taller buffer; rows that
-// scroll off are stacked just above it, and present() copies a display-sized
-// window that pans across them. See textmode_smooth_line().
-#define MAXPEND 16                  // max rows that can slide at once; beyond -> jump
+// Free-running scrolling framebuffer: the live content is rendered at base_y in
+// a taller buffer, and each scroll just advances base_y by one row and renders
+// the new bottom row -- older rows are already in place, so nothing is moved per
+// scroll. present() copies a display-sized window at (base_y - d) that pans as d
+// settles. Every REBASE_GAP scrolls base_y is reset with one bulk copy.
+#define MAXPEND    16               // max rows a single slide can span; beyond -> jump
+#define REBASE_GAP 128              // scrolls between buffer rebases
 static int smooth_on = 0;           // enabled by settings
 static int line_h = 16;             // nominal row height in px (fb_height/ROWS)
-static int content_y0 = 0;          // tall-buffer y where the live content starts
-static int tall_h = 0;              // tall buffer height = content_y0 + fb_height
+static int headroom = 0;            // px of spare above content for outgoing rows (MAXPEND*line_h)
+static int base_y = 0;             // tall-buffer y of the live content's top row
+static int tall_h = 0;              // total tall buffer height (px)
 static int base_step = 10;          // min pan px/frame (the configured glide speed)
 static int d = 0;                   // pixels left to settle (>0 = a slide in flight)
-static int pending = 0;             // rows currently stacked above the content
 static int backlog_lines = 0;       // lines still buffered in the serial ring (look-ahead)
 static int exact_rows = 1;          // 1 when line_h*ROWS == fb_height (no scroll drift)
 static int cur_step = 0;            // eased pan speed (px/frame) for smooth acceleration
@@ -256,17 +259,19 @@ void textmode_init(void) {
     int cell_h = ((int)fb_height + TERM_ROWS - 1) / TERM_ROWS;
     glyphs_init(cell_w, cell_h);
 
-    // Tall render buffer: MAXPEND spare rows above the live content, so up to
-    // MAXPEND scrolled-off rows can be stacked and the window panned across them.
+    // Tall render buffer: headroom above the content for scrolled-off (outgoing)
+    // rows the window pans over, plus REBASE_GAP rows below so base_y can free-run
+    // for many scrolls between rebases.
     line_h = (int)fb_height / TERM_ROWS;
     if (line_h < 1) line_h = 1;
     exact_rows = (line_h * TERM_ROWS == (int)fb_height);   // no drift -> skip settle re-render
-    content_y0 = MAXPEND * line_h;
-    tall_h = content_y0 + (int)fb_height;
+    headroom = MAXPEND * line_h;
+    tall_h = headroom + (int)fb_height + REBASE_GAP * line_h;
     tall_mem = calloc((size_t)tall_h * fb_pitch, 1);
     if (!tall_mem) { fprintf(stderr, "textmode: tall buffer alloc failed\n"); exit(1); }
-    fb_mem = tall_mem + (size_t)content_y0 * fb_pitch;   // rendering targets the content region
-    d = 0; pending = 0;
+    base_y = headroom;
+    fb_mem = tall_mem + (size_t)base_y * fb_pitch;   // rendering targets the content region
+    d = 0;
 
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
@@ -329,13 +334,13 @@ void textmode_set_flash(int on) {
 }
 
 // ---- smooth scroll ---------------------------------------------------------
-// The live content always renders into the fixed region tall_mem[content_y0..]
-// (fb_mem points there). When a line scrolls, the row leaving the top is copied
-// into the spare region just above the content, and `d` (pixels to settle) grows
-// by one row. present() copies a display-sized window at (content_y0 - d), so as
-// d shrinks to 0 the stacked rows slide off the top and the content slides up --
-// a genuine scrolling framebuffer. Because new text still renders into the fixed
-// content region, it can arrive mid-slide without any misalignment.
+// A free-running scrolling framebuffer. The live content renders at base_y in a
+// taller buffer (fb_mem points there). A scroll advances base_y by one row and
+// renders only the new bottom row -- older rows are already in place and the row
+// leaving the top is simply left just above as the outgoing row, so nothing is
+// bulk-moved per scroll. present() copies a display-sized window at (base_y - d);
+// as d settles to 0 the outgoing row slides off and the content slides up. base_y
+// free-runs and is rebased with one bulk copy every REBASE_GAP scrolls.
 
 int textmode_smooth_enabled(void) { return smooth_on; }
 
@@ -345,33 +350,31 @@ void textmode_set_smooth(int on, int pps) {
     if (!smooth_on) textmode_scroll_snap();
 }
 
+// Reset base_y back to `headroom` with a single bulk copy of the active region
+// (outgoing headroom + content), so scrolls can keep advancing base_y. Preserves
+// the in-flight slide (everything shifts by the same amount).
+static void scroll_rebase(void) {
+    int src = base_y - headroom;
+    int rows = headroom + (int)fb_height;
+    memmove(tall_mem, tall_mem + (size_t)src * fb_pitch, (size_t)rows * fb_pitch);
+    base_y = headroom;
+    fb_mem = tall_mem + (size_t)base_y * fb_pitch;
+}
+
 void textmode_smooth_line(void) {
     if (!smooth_on) { textmode_render_all(); return; }
 
-    // More than MAXPEND rows stacked can't fit the spare region: jump.
-    if (pending >= MAXPEND) { d = 0; pending = 0; textmode_render_all(); return; }
-
-    // Push the existing outgoing stack up one row, then copy the current content
-    // top row (the row that just scrolled off; content isn't re-rendered yet) into
-    // the freed slot directly above the content.
-    if (pending > 0)
-        memmove(tall_mem + (size_t)(content_y0 - (pending + 1) * line_h) * fb_pitch,
-                tall_mem + (size_t)(content_y0 - pending * line_h) * fb_pitch,
-                (size_t)(pending * line_h) * fb_pitch);
-    memcpy(tall_mem + (size_t)(content_y0 - line_h) * fb_pitch,
-           tall_mem + (size_t)content_y0 * fb_pitch,
-           (size_t)line_h * fb_pitch);
-
-    // Update the content region cheaply: shift it up one row (memmove) and render
-    // only the new bottom row, instead of a full re-render every scroll -- that
-    // keeps per-scroll work small so frames stay on the vblank cadence (a full
-    // render_all() on settle corrects any sub-pixel drift on odd row heights).
-    memmove(fb_mem, fb_mem + (size_t)line_h * fb_pitch,
-            (size_t)((int)fb_height - line_h) * fb_pitch);
+    // Advance the content one row: old rows 1..N-1 are already at the new logical
+    // positions, and the old top row is left in place just above as the outgoing
+    // row -- so all we render is the new bottom row. No per-scroll bulk move.
+    base_y += line_h;
+    fb_mem = tall_mem + (size_t)base_y * fb_pitch;
     for (int c = 0; c < TERM_COLS; ++c) draw_cell(TERM_ROWS - 1, c, 0);
 
-    pending++;
-    d += line_h;
+    if (d + line_h > headroom) d = 0;      // slide would exceed the headroom -> settle (jump)
+    else d += line_h;
+
+    if (base_y + (int)fb_height + line_h > tall_h) scroll_rebase();
     dirty = 1;
 }
 
@@ -389,9 +392,10 @@ void textmode_scroll_tick(void) {
     int maxstep = 4 * line_h;
     if (target > maxstep) target = maxstep;
 
-    // Ease toward the target so the speed ramps smoothly (no abrupt jerk when a
-    // burst arrives or drains).
-    cur_step += (target - cur_step) / 4;
+    // Ease toward the target so the speed ramps smoothly (rounding away from zero
+    // so a small difference still moves -- integer /4 alone would stick).
+    if (cur_step < target)      cur_step += (target - cur_step + 3) / 4;
+    else if (cur_step > target) cur_step -= (cur_step - target + 3) / 4;
     if (cur_step < base_step) cur_step = base_step;
 
     int step = cur_step;
@@ -400,14 +404,14 @@ void textmode_scroll_tick(void) {
 
     d -= step;
     if (d <= 0) {
-        d = 0; pending = 0;               // settled; stacked rows are now off-window
+        d = 0;                                    // settled
         if (!exact_rows) textmode_render_all();   // only needed to clear drift
     }
     dirty = 1;                     // the window moved, so re-present
 }
 
 int  textmode_scroll_busy(void) { return d > 0; }
-void textmode_scroll_snap(void) { if (d > 0) { d = 0; pending = 0; dirty = 1; } }
+void textmode_scroll_snap(void) { if (d > 0) { d = 0; dirty = 1; } }
 void textmode_set_scroll_pace(int backlog) { (void)backlog; }   // pacing derived internally
 
 // Lines still buffered in the serial ring (the main loop's look-ahead); drives
@@ -441,7 +445,7 @@ void textmode_handle_flip(void) {
 // (keeps us to one frame per vblank).
 void textmode_present(void) {
     if (flip_pending || !dirty) return;
-    const uint8_t *win = tall_mem + (size_t)(content_y0 - d) * fb_pitch;
+    const uint8_t *win = tall_mem + (size_t)(base_y - d) * fb_pitch;
     memcpy(db_mem[back_idx], win, (size_t)fb_height * fb_pitch);
     dirty = 0;
     flipped_to = back_idx;

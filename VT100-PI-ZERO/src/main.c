@@ -99,7 +99,8 @@ int main(void) {
     long long next_blink = now_ms() + 500;
     long long flash_until = -1;   // -1 = no visual-bell flash pending
     int blink = 0;
-    int was_scrolling = 0;        // to restore the cursor when a slide settles
+    long long last_out = 0;       // last host-output time (for idle cursor)
+    int cur_shown = 0;            // is the cursor currently painted?
 
     struct pollfd pfds[3];
     pfds[0].fd = serial_fd();          pfds[0].events = POLLIN;
@@ -145,7 +146,7 @@ int main(void) {
             // the ring gets very deep, stop pacing and drain it to bound the lag.
             textmode_set_backlog(inbuf_pending_lines());
             while (!inbuf_empty() && (textmode_feed_room() || inbuf_count() > INBUF_SIZE / 2)) {
-                if (!activity) { screen_hide_cursor(); activity = 1; }
+                if (!activity) { screen_hide_cursor(); activity = 1; cur_shown = 0; }
                 vt100_feed((uint8_t)inbuf_pop());
             }
             textmode_set_backlog(inbuf_pending_lines());
@@ -155,16 +156,13 @@ int main(void) {
             while ((k = kbd_getc()) >= 0) {
                 if (kn < (int)sizeof kb) kb[kn++] = (uint8_t)k;
                 if (g_settings.local_echo) {
-                    if (!activity) { screen_hide_cursor(); activity = 1; }
+                    if (!activity) { screen_hide_cursor(); activity = 1; cur_shown = 0; }
                     vt100_feed((uint8_t)k);
                     if (k == '\r') vt100_feed('\n');
                 }
             }
             if (kn) serial_write(kb, (uint32_t)kn);
-            // Only paint the cursor when fully caught up (not mid-slide and nothing
-            // buffered) -- otherwise it flickers/scans along the bottom row during
-            // continuous scrolling.
-            if (activity && !textmode_scroll_busy() && inbuf_empty()) screen_show_cursor();
+            if (activity) last_out = now_ms();   // cursor stays hidden until output idles
 
             // Visual bell (no audible-bell hardware on this board).
             if (vt100_take_bell()) {
@@ -175,11 +173,15 @@ int main(void) {
 
         // Advance a smooth scroll one step per vblank (gated on the flip so the
         // slide is paced to the display, not the CPU loop).
-        if (!booting && !setup_active() && !textmode_flip_pending()) {
+        if (!booting && !setup_active() && !textmode_flip_pending())
             textmode_scroll_tick();
-            if (was_scrolling && !textmode_scroll_busy() && inbuf_empty())
-                screen_show_cursor();            // fully caught up: restore the cursor
-            was_scrolling = textmode_scroll_busy();
+
+        // Cursor appears only once output has been idle briefly and never
+        // mid-scroll, so it doesn't flicker along the bottom during scrolling.
+        if (!booting && !setup_active() && !cur_shown && !textmode_scroll_busy()
+            && inbuf_empty() && now_ms() - last_out > 200) {
+            screen_show_cursor();
+            cur_shown = 1;
         }
 
         // Blink / bell timers, only when idle (not in Setup, not mid-slide).
