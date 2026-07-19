@@ -178,10 +178,9 @@ void glyphs_init(int cell_w, int cell_h) {
     }
     fprintf(stderr, "glyphs: font %s, atlas %dx%d\n", path, aw, ah);
 
-    // Fill the cell height with the font, and pick a pixel *width* so the glyph
-    // advance fills the cell too. Setting width = aw directly makes glyphs ~40%
-    // too narrow, because a monospace advance is only ~0.6 em -- so measure the
-    // natural advance at a square size and scale the em width up to match aw.
+    // Width: make the glyph advance fill the cell. Setting pixel width = aw
+    // directly makes glyphs ~40% too narrow (a monospace advance is only ~0.6
+    // em), so measure the natural advance at a square size and scale em width up.
     FT_Set_Pixel_Sizes(face, (FT_UInt)ah, (FT_UInt)ah);
     int adv_nat = ah;
     FT_UInt ref = FT_Get_Char_Index(face, 'M');
@@ -189,11 +188,22 @@ void glyphs_init(int cell_w, int cell_h) {
         adv_nat = (int)(face->glyph->advance.x >> 6);
     int em_w = (adv_nat > 0) ? (ah * aw / adv_nat) : aw;
     if (em_w < 1) em_w = 1;
-    FT_Set_Pixel_Sizes(face, (FT_UInt)em_w, (FT_UInt)ah);
 
-    int baseline = (int)(face->size->metrics.ascender >> 6);
-    int line_h   = (int)(face->size->metrics.height >> 6);
-    int y_base   = baseline + (ah - line_h) / 2;   // baseline, cell-centred
+    // Height: scale the em so the font's full ascender-to-descender span fits
+    // the cell. Using ah directly makes the em too tall (the span is ~1.16 em
+    // for DejaVu), so descenders (g, j, y, p, q) spill past the bottom and clip.
+    int em_h = ah;
+    long span = (long)face->ascender - (long)face->descender;   // design units (>0)
+    if (span > 0 && face->units_per_EM > 0)
+        em_h = (int)((long)ah * face->units_per_EM / span);
+    if (em_h < 1) em_h = 1;
+
+    FT_Set_Pixel_Sizes(face, (FT_UInt)em_w, (FT_UInt)em_h);
+
+    int asc  = (int)(face->size->metrics.ascender >> 6);
+    int desc = (int)(face->size->metrics.descender >> 6);   // negative
+    int full = asc - desc;
+    int y_base = asc + (ah - full) / 2;    // baseline, centred with any leftover slack
 
     for (int code = 0; code < GLYPH_COUNT; ++code) {
         uint8_t *cell = atlas + (size_t)code * aw * ah;
