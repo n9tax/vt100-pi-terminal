@@ -11,6 +11,7 @@
 #include "io/serial_linux.h"
 #include "io/host_link.h"
 #include "net/netlink.h"
+#include "service.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -19,8 +20,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-enum { F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_THEME, F_FG, F_BG,
-       F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_FONT, NFIELDS };
+enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_THEME, F_FG, F_BG,
+       F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_FONT, F_BOOT, NFIELDS };
 
 static int is_text_field(int i) {
     return i == F_SERIAL || i == F_FG || i == F_BG || i == F_SSH || i == F_TELNET;
@@ -33,6 +34,8 @@ static settings_t orig;                     // snapshot at open (for change dete
 static cell_t saved[TERM_ROWS][TERM_COLS];  // terminal screen behind the menu
 static int esc;                             // escape-sequence parser state
 static char ip_str[64];                     // this Pi's IP (to ssh into it), shown in header
+static int boot_flag;                        // start-at-boot toggle (mirrors systemd state)
+static int boot_orig;                        // its value at open, for change detection
 
 static const int  bauds[]  = { 300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
 #define NBAUDS ((int)(sizeof bauds / sizeof bauds[0]))
@@ -65,6 +68,8 @@ static void put(int r, int c, const char *s, uint8_t fg, uint8_t bg, uint8_t att
 
 static void field_value(int i, char *out, size_t n) {
     switch (i) {
+        case F_SHELL:  snprintf(out, n, "%s", work.local_shell ? "on" : "off"); break;
+        case F_BOOT:   snprintf(out, n, "%s", boot_flag ? "on" : "off"); break;
         case F_SERIAL: snprintf(out, n, "%s", work.serial_dev); break;
         case F_BAUD:   snprintf(out, n, "%d", work.baud); break;
         case F_SSH:    snprintf(out, n, "%s", work.ssh_host); break;
@@ -89,9 +94,9 @@ static void field_value(int i, char *out, size_t n) {
 
 static void draw(void) {
     static const char *labels[NFIELDS] = {
-        "Serial device", "Baud rate", "SSH host", "Telnet host", "Telnet port",
-        "Theme", "Custom FG", "Custom BG", "Cursor", "Local echo",
-        "Smooth scroll", "Scroll speed", "Font",
+        "Local shell", "Serial device", "Baud rate", "SSH host", "Telnet host",
+        "Telnet port", "Theme", "Custom FG", "Custom BG", "Cursor", "Local echo",
+        "Smooth scroll", "Scroll speed", "Font", "Start at boot",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
@@ -145,6 +150,8 @@ static void change(int d) {
             work.telnet_port = tports[idx];
             break;
         }
+        case F_SHELL:  work.local_shell ^= 1; break;
+        case F_BOOT:   boot_flag ^= 1; break;
         case F_THEME:  { int nt = themes_count(); work.theme = (work.theme + d + nt) % nt; break; }
         case F_CURSOR: work.cursor_style ^= 1; break;
         case F_ECHO:   work.local_echo ^= 1; break;
@@ -214,19 +221,28 @@ static void do_save(void) {
     if (strcmp(work.font_path, orig.font_path) != 0)
         textmode_reload_font();
 
-    // (Re)connect the host link if a network destination changed: ssh wins, else
-    // telnet, else back to serial. Prompts appear once the menu closes.
-    if (strcmp(work.ssh_host, orig.ssh_host) != 0 ||
+    // (Re)connect the host link if the destination changed. Priority:
+    // local shell > ssh > telnet > serial. Prompts appear once the menu closes.
+    if (work.local_shell != orig.local_shell ||
+        strcmp(work.ssh_host, orig.ssh_host) != 0 ||
         strcmp(work.telnet_host, orig.telnet_host) != 0 ||
         work.telnet_port != orig.telnet_port) {
         netlink_close();
-        if (work.ssh_host[0] && netlink_connect_ssh(work.ssh_host) == 0)
+        if (work.local_shell && netlink_connect_shell() == 0)
+            host_link_set_write_fn(netlink_write);
+        else if (work.ssh_host[0] && netlink_connect_ssh(work.ssh_host) == 0)
             host_link_set_write_fn(netlink_write);
         else if (work.telnet_host[0] &&
                  netlink_connect_telnet(work.telnet_host, work.telnet_port) == 0)
             host_link_set_write_fn(netlink_write);
         else
             host_link_set_write_fn(serial_write);
+    }
+
+    // Start-at-boot: install/enable or disable the systemd unit when toggled.
+    if (boot_flag != boot_orig) {
+        if (service_set_boot(boot_flag) != 0)
+            boot_flag = boot_orig;   // failed (not root?): revert the shown state
     }
 
     active = 0;
@@ -241,6 +257,7 @@ void setup_toggle(void) {
         orig = g_settings;
         memcpy(saved, tm_cells, sizeof saved);
         find_ip(ip_str, sizeof ip_str);   // refresh the Pi's IP for the header
+        boot_flag = boot_orig = service_boot_enabled();   // reflect real systemd state
         active = 1;
         sel = 0;
         esc = 0;

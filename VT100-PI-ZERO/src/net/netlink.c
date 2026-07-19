@@ -25,7 +25,7 @@
 
 static int   fd = -1;                                 // socket or PTY master
 static pid_t child_pid = -1;                          // ssh child (M_SSH only)
-static enum { M_NONE, M_TELNET, M_SSH } mode = M_NONE;
+static enum { M_NONE, M_TELNET, M_PTY } mode = M_NONE;   // M_PTY: raw pty (ssh or shell)
 static void (*emit_cb)(uint8_t) = 0;
 
 void netlink_set_emit(void (*emit)(uint8_t byte)) { emit_cb = emit; }
@@ -115,12 +115,11 @@ int netlink_connect_telnet(const char *host, int port) {
     return 0;
 }
 
-// ---- SSH (PTY + exec ssh) --------------------------------------------------
-int netlink_connect_ssh(const char *dest) {
-    netlink_close();
-    if (!dest || !dest[0]) return -1;
+// ---- PTY-backed links (ssh, local shell) -----------------------------------
+// Spawn argv on a fresh PTY; the master fd becomes the raw host link. Returns 0
+// on success. Used by both the ssh and local-shell connectors.
+static int spawn_pty(char *const argv[]) {
     signal(SIGPIPE, SIG_IGN);
-
     int master = posix_openpt(O_RDWR | O_NOCTTY);
     if (master < 0 || grantpt(master) || unlockpt(master)) {
         fprintf(stderr, "netlink: posix_openpt failed: %s\n", strerror(errno));
@@ -138,7 +137,7 @@ int netlink_connect_ssh(const char *dest) {
     pid_t pid = fork();
     if (pid < 0) { close(master); return -1; }
     if (pid == 0) {
-        // Child: give it the slave as its controlling terminal, then exec ssh.
+        // Child: give it the slave as its controlling terminal, then exec.
         setsid();
         int slave = open(slave_name, O_RDWR);
         if (slave < 0) _exit(127);
@@ -147,16 +146,33 @@ int netlink_connect_ssh(const char *dest) {
         if (slave > 2) close(slave);
         close(master);
         setenv("TERM", "xterm-16color", 1);
-        execlp("ssh", "ssh", "-o", "StrictHostKeyChecking=accept-new", dest, (char *)NULL);
+        execvp(argv[0], argv);
         _exit(127);   // exec failed
     }
 
-    // Parent: the master fd is the host link.
     fcntl(master, F_SETFL, O_NONBLOCK);
     fd = master;
     child_pid = pid;
-    mode = M_SSH;
-    fprintf(stderr, "netlink: ssh %s (pid %d)\n", dest, pid);
+    mode = M_PTY;
+    return 0;
+}
+
+int netlink_connect_ssh(const char *dest) {
+    netlink_close();
+    if (!dest || !dest[0]) return -1;
+    char *argv[] = { "ssh", "-o", "StrictHostKeyChecking=accept-new", (char *)dest, NULL };
+    if (spawn_pty(argv) != 0) return -1;
+    fprintf(stderr, "netlink: ssh %s (pid %d)\n", dest, (int)child_pid);
+    return 0;
+}
+
+int netlink_connect_shell(void) {
+    netlink_close();
+    const char *sh = getenv("SHELL");
+    if (!sh || !sh[0]) sh = "/bin/bash";
+    char *argv[] = { (char *)sh, "-l", NULL };   // login shell on the Pi
+    if (spawn_pty(argv) != 0) return -1;
+    fprintf(stderr, "netlink: local shell %s (pid %d)\n", sh, (int)child_pid);
     return 0;
 }
 

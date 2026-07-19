@@ -21,6 +21,7 @@ typedef struct {
     char telnet_host[128];  // "" = use serial; else connect Telnet on boot
     int  telnet_port;       // default 23
     char ssh_host[128];     // "" = none; else "host"/"user@host", connect ssh on boot
+    int  local_shell;       // 1 = connect a local Pi shell (highest priority)
 } settings_t;
 
 extern settings_t g_settings;

@@ -57,4 +57,8 @@
 #define TELNET_HOST_DEFAULT ""
 #define TELNET_PORT_DEFAULT 23
 
+// Connect to a local shell on the Pi (use the Pi OS directly) instead of a
+// serial/network host. Highest priority when on.
+#define LOCAL_SHELL_DEFAULT 0
+
 #endif // VT100_CONFIG_H

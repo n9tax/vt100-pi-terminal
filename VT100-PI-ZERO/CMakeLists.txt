@@ -17,6 +17,7 @@ add_executable(vt100-pi-zero
         src/main.c
         src/settings.c
         src/setup.c
+        src/service.c
         src/terminal/vtparse.c
         src/terminal/screen.c
         src/terminal/vt100.c

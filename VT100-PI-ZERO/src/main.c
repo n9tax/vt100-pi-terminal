@@ -98,10 +98,12 @@ int main(void) {
     vt100_init();
     host_link_set_write_fn(serial_write);   // default transport: serial
 
-    // Optional network host link: connect on boot if configured (ssh preferred),
-    // routing keyboard/replies out the connection instead of the serial port.
+    // Optional non-serial host link: connect on boot if configured, routing
+    // keyboard/replies out that connection instead of the serial port. Priority:
+    // local shell > ssh > telnet > serial.
     netlink_set_emit(net_emit);
-    if ((g_settings.ssh_host[0] && netlink_connect_ssh(g_settings.ssh_host) == 0) ||
+    if ((g_settings.local_shell && netlink_connect_shell() == 0) ||
+        (g_settings.ssh_host[0] && netlink_connect_ssh(g_settings.ssh_host) == 0) ||
         (g_settings.telnet_host[0] &&
          netlink_connect_telnet(g_settings.telnet_host, g_settings.telnet_port) == 0))
         host_link_set_write_fn(netlink_write);

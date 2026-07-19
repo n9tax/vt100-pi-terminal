@@ -19,6 +19,10 @@ int  netlink_connect_telnet(const char *host, int port);
 // failure to spawn. Password/host-key prompts appear in the terminal as usual.
 int  netlink_connect_ssh(const char *dest);
 
+// Run a local login shell on the Pi over a PTY (for using the Pi OS directly).
+// Returns 0 on success, -1 on failure.
+int  netlink_connect_shell(void);
+
 void netlink_close(void);
 int  netlink_connected(void);
 int  netlink_fd(void);          // socket fd for poll(); -1 when not connected
