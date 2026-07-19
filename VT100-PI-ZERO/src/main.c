@@ -56,7 +56,7 @@ static long long now_ms(void) {
 // bytes land here, then are metered into vt100_feed() so smooth scroll can slide
 // cleanly and read the buffered line count as look-ahead for its speed.
 #define INBUF_SIZE 65536
-#define DUMP_LINES 40           // buffered lines past which we dump-and-reset (overrun)
+#define DUMP_LINES 80           // buffered lines past which we dump-and-reset (overrun)
 static uint8_t inbuf[INBUF_SIZE];
 static int inbuf_head, inbuf_tail;
 static int inbuf_nl;                 // running count of buffered newlines (look-ahead)
