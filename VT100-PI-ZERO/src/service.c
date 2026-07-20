@@ -54,12 +54,24 @@ int service_set_boot(int on) {
         if (system(cmd) != 0) { fprintf(stderr, "service: install binary failed\n"); return -1; }
     }
 
+    // Clear any prior mask (a symlink to /dev/null) BEFORE writing, otherwise
+    // fopen() below would just write through the symlink into /dev/null and the
+    // unit would stay masked / unstartable.
+    system("systemctl unmask " UNIT_NAME " 2>/dev/null");
+
     FILE *f = fopen(UNIT_PATH, "w");
     if (!f) { fprintf(stderr, "service: cannot write %s\n", UNIT_PATH); return -1; }
     fputs(UNIT_TEXT, f);
     fclose(f);
 
     system("systemctl daemon-reload");
+
+    // Enable OUR unit first. Only if that succeeds do we take the console away
+    // from getty — so a failure here can never leave the Pi with no console.
+    if (system("systemctl enable " UNIT_NAME) != 0) {
+        fprintf(stderr, "service: enable %s failed; leaving getty@tty1 in place\n", UNIT_NAME);
+        return -1;
+    }
     system("systemctl disable getty@tty1.service 2>/dev/null");   // free tty1 for next boot
-    return system("systemctl enable " UNIT_NAME) == 0 ? 0 : -1;
+    return 0;
 }
