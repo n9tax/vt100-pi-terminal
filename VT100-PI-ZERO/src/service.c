@@ -31,6 +31,114 @@ static const char *UNIT_TEXT =
     "[Install]\n"
     "WantedBy=multi-user.target\n";
 
+// ---- boot quieting (mask the Linux boot chatter behind our own splash) -----
+// All edits are on the Pi's boot partition and are undone from *.vt100.bak on
+// disable. None of these flags affect *whether* the Pi boots, only what prints.
+
+// Locate a boot-partition file: /boot/firmware (Bookworm) or /boot (older).
+static const char *find_boot_file(const char *name, char *out, size_t n) {
+    snprintf(out, n, "/boot/firmware/%s", name);
+    if (access(out, F_OK) == 0) return out;
+    snprintf(out, n, "/boot/%s", name);
+    if (access(out, F_OK) == 0) return out;
+    return NULL;
+}
+
+// Copy path -> path.vt100.bak once (never clobbers an existing backup).
+static void backup_once(const char *path) {
+    char cmd[600];
+    snprintf(cmd, sizeof cmd, "cp -n '%s' '%s.vt100.bak' 2>/dev/null", path, path);
+    system(cmd);
+}
+
+// Whitespace-delimited exact-token membership test.
+static int has_token(const char *line, const char *tok) {
+    size_t tl = strlen(tok);
+    for (const char *p = line; *p; ) {
+        while (*p == ' ' || *p == '\t' || *p == '\n') p++;
+        const char *s = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+        if ((size_t)(p - s) == tl && strncmp(s, tok, tl) == 0) return 1;
+    }
+    return 0;
+}
+
+// Rewrite cmdline.txt (must stay one line): send console text to tty3, silence
+// the kernel, drop the boot logos and the console cursor. Leaves tty1 blank for
+// our app to take over.
+static void quiet_cmdline(void) {
+    char path[128];
+    if (!find_boot_file("cmdline.txt", path, sizeof path)) return;
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char line[1024];
+    if (!fgets(line, sizeof line, f)) { fclose(f); return; }
+    fclose(f);
+    line[strcspn(line, "\r\n")] = '\0';
+    backup_once(path);
+
+    char out[1400] = "";
+    int  first = 1, saw_console_tty = 0;
+    char work[1024];
+    snprintf(work, sizeof work, "%s", line);
+    char *save = NULL;
+    for (char *t = strtok_r(work, " \t", &save); t; t = strtok_r(NULL, " \t", &save)) {
+        const char *emit = t;
+        if (strcmp(t, "console=tty1") == 0) { emit = "console=tty3"; saw_console_tty = 1; }
+        else if (strcmp(t, "console=tty3") == 0) saw_console_tty = 1;
+        if (!first) strncat(out, " ", sizeof out - strlen(out) - 1);
+        strncat(out, emit, sizeof out - strlen(out) - 1);
+        first = 0;
+    }
+    const char *want[] = { "quiet", "loglevel=3", "logo.nologo", "vt.global_cursor_default=0" };
+    for (int i = 0; i < 4; ++i)
+        if (!has_token(out, want[i])) {
+            strncat(out, " ", sizeof out - strlen(out) - 1);
+            strncat(out, want[i], sizeof out - strlen(out) - 1);
+        }
+    if (!saw_console_tty) strncat(out, " console=tty3", sizeof out - strlen(out) - 1);
+
+    FILE *w = fopen(path, "w");
+    if (!w) { fprintf(stderr, "service: cannot write %s\n", path); return; }
+    fprintf(w, "%s\n", out);
+    fclose(w);
+}
+
+// Append disable_splash=1 to config.txt (kills the firmware rainbow square).
+static void quiet_config(void) {
+    char path[128];
+    if (!find_boot_file("config.txt", path, sizeof path)) return;
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char buf[8192];
+    size_t nrd = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[nrd] = '\0';
+    if (strstr(buf, "disable_splash")) return;   // already set
+    backup_once(path);
+    FILE *w = fopen(path, "a");
+    if (!w) return;
+    fputs("\n# Added by VT100-PI\ndisable_splash=1\n", w);
+    fclose(w);
+}
+
+static void quiet_boot(void)   { quiet_cmdline(); quiet_config(); }
+
+// Restore the boot files from the backups we made (undo the quieting).
+static void restore_boot(void) {
+    const char *names[] = { "cmdline.txt", "config.txt" };
+    for (int i = 0; i < 2; ++i) {
+        char path[128];
+        if (!find_boot_file(names[i], path, sizeof path)) continue;
+        char bak[160];
+        snprintf(bak, sizeof bak, "%s.vt100.bak", path);
+        if (access(bak, F_OK) != 0) continue;
+        char cmd[600];
+        snprintf(cmd, sizeof cmd, "cp -f '%s' '%s'", bak, path);
+        system(cmd);
+    }
+}
+
 int service_boot_enabled(void) {
     return system("systemctl is-enabled --quiet " UNIT_NAME) == 0;
 }
@@ -39,6 +147,7 @@ int service_set_boot(int on) {
     if (!on) {
         system("systemctl disable " UNIT_NAME " 2>/dev/null");
         system("systemctl enable getty@tty1.service 2>/dev/null");   // restore console login
+        restore_boot();                                              // un-quiet the boot
         return 0;
     }
 
@@ -73,5 +182,6 @@ int service_set_boot(int on) {
         return -1;
     }
     system("systemctl disable getty@tty1.service 2>/dev/null");   // free tty1 for next boot
+    quiet_boot();                                                 // hide the Linux boot chatter
     return 0;
 }

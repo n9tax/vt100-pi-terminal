@@ -7,6 +7,7 @@
 // and no on-screen Setup menu yet (see ../README.md for the build order).
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #include <poll.h>
 #include <time.h>
 
@@ -21,15 +22,18 @@
 #include "terminal/screen.h"
 #include "terminal/vt100.h"
 
-// Power-on self-test splash: "VT100 OK" in a box, centred. Cleared by RETURN
-// into a blank terminal (see the main loop's boot phase).
+// Boot splash: "VT100 PI INITIALIZING..." in a centred box, with a hint line.
+// Held until RETURN (see the main loop's boot phase), so it also masks the tail
+// of the Linux boot until the operator is ready.
 static void splash_draw(void) {
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
             tm_cells[r][c] = (cell_t){ ' ', 7, 0, 0 };
 
-    const char *msg = "VT100 OK";
-    const int w = 12, r0 = TERM_ROWS / 2 - 1, c0 = (TERM_COLS - w) / 2;
+    const char *msg  = "VT100 PI INITIALIZING...";
+    const char *hint = "Press RETURN to begin";
+    const int w = (int)strlen(msg) + 6;                 // 3 cols padding each side
+    const int r0 = TERM_ROWS / 2 - 2, c0 = (TERM_COLS - w) / 2;
     tm_cells[r0][c0]             = (cell_t){ 0xDA, 7, 0, 0 };   // top-left corner
     tm_cells[r0][c0 + w - 1]     = (cell_t){ 0xBF, 7, 0, 0 };   // top-right corner
     tm_cells[r0 + 2][c0]         = (cell_t){ 0xC0, 7, 0, 0 };   // bottom-left
@@ -41,7 +45,11 @@ static void splash_draw(void) {
     tm_cells[r0 + 1][c0]         = (cell_t){ 0xB3, 7, 0, 0 };   // side bars
     tm_cells[r0 + 1][c0 + w - 1] = (cell_t){ 0xB3, 7, 0, 0 };
     for (int i = 0; msg[i]; ++i)
-        tm_cells[r0 + 1][c0 + 2 + i] = (cell_t){ (uint8_t)msg[i], 7, 0, 0 };
+        tm_cells[r0 + 1][c0 + 3 + i] = (cell_t){ (uint8_t)msg[i], 7, 0, ATTR_BOLD };
+
+    int hc = (TERM_COLS - (int)strlen(hint)) / 2;
+    for (int i = 0; hint[i]; ++i)
+        tm_cells[r0 + 4][hc + i] = (cell_t){ (uint8_t)hint[i], 7, 0, 0 };
 
     textmode_render_all();
 }
