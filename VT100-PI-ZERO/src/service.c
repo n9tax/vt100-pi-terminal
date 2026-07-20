@@ -5,11 +5,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define UNIT_NAME "vt100-pi.service"
 #define UNIT_PATH "/etc/systemd/system/" UNIT_NAME
 #define BIN_PATH  "/usr/local/bin/vt100-pi-zero"
+
+// Early-boot banner: prints "Wait." on tty1 (console font) while Linux boots,
+// like a real VT320's self-test, until our app grabs the screen. See service.c.
+#define WAIT_NAME      "vt100-wait.service"
+#define WAIT_UNIT_PATH "/etc/systemd/system/" WAIT_NAME
+#define WAIT_BIN       "/usr/local/bin/vt100-wait"
 
 static const char *UNIT_TEXT =
     "[Unit]\n"
@@ -139,6 +146,56 @@ static void restore_boot(void) {
     }
 }
 
+// ---- boot "Wait." banner ---------------------------------------------------
+// A tiny shell script (centres itself to the console size) plus an early oneshot
+// unit that runs it during sysinit, so "Wait." is on tty1 for the whole boot.
+static const char *WAIT_SCRIPT =
+    "#!/bin/sh\n"
+    "# VT100-PI boot banner: hold \"Wait\" in the top-left of tty1 (as a real VT320\n"
+    "# shows during self-test) until our app grabs the screen.\n"
+    "TTY=/dev/tty1\n"
+    "chvt 1 2>/dev/null || true\n"
+    "printf '\\033[2J\\033[?25l\\033[HWait' > \"$TTY\" 2>/dev/null || true\n";
+
+static const char *WAIT_UNIT_TEXT =
+    "[Unit]\n"
+    "Description=VT100-PI boot banner\n"
+    "DefaultDependencies=no\n"
+    "After=systemd-udevd.service\n"
+    "Before=sysinit.target " UNIT_NAME "\n"
+    "Conflicts=getty@tty1.service\n"
+    "\n"
+    "[Service]\n"
+    "Type=oneshot\n"
+    "RemainAfterExit=yes\n"
+    "ExecStart=" WAIT_BIN "\n"
+    "\n"
+    "[Install]\n"
+    "WantedBy=sysinit.target\n";
+
+static void install_wait_banner(void) {
+    FILE *s = fopen(WAIT_BIN, "w");
+    if (!s) { fprintf(stderr, "service: cannot write %s\n", WAIT_BIN); return; }
+    fputs(WAIT_SCRIPT, s);
+    fclose(s);
+    chmod(WAIT_BIN, 0755);
+
+    system("systemctl unmask " WAIT_NAME " 2>/dev/null");
+    FILE *u = fopen(WAIT_UNIT_PATH, "w");
+    if (!u) { fprintf(stderr, "service: cannot write %s\n", WAIT_UNIT_PATH); return; }
+    fputs(WAIT_UNIT_TEXT, u);
+    fclose(u);
+    system("systemctl daemon-reload");
+    system("systemctl enable " WAIT_NAME " 2>/dev/null");
+}
+
+static void remove_wait_banner(void) {
+    system("systemctl disable " WAIT_NAME " 2>/dev/null");
+    unlink(WAIT_UNIT_PATH);
+    unlink(WAIT_BIN);
+    system("systemctl daemon-reload");
+}
+
 int service_boot_enabled(void) {
     return system("systemctl is-enabled --quiet " UNIT_NAME) == 0;
 }
@@ -147,6 +204,7 @@ int service_set_boot(int on) {
     if (!on) {
         system("systemctl disable " UNIT_NAME " 2>/dev/null");
         system("systemctl enable getty@tty1.service 2>/dev/null");   // restore console login
+        remove_wait_banner();                                        // drop the Wait. banner
         restore_boot();                                              // un-quiet the boot
         return 0;
     }
@@ -183,5 +241,6 @@ int service_set_boot(int on) {
     }
     system("systemctl disable getty@tty1.service 2>/dev/null");   // free tty1 for next boot
     quiet_boot();                                                 // hide the Linux boot chatter
+    install_wait_banner();                                        // show "Wait." during boot
     return 0;
 }
