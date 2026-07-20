@@ -12,8 +12,15 @@
 // process on failure to find one.
 void kbd_init(void);
 
-// The fd to include in the main poll() loop.
+// The fd to include in the main poll() loop. -1 while no keyboard is open
+// (e.g. after a USB disconnect, until kbd_reopen() finds it again); poll()
+// ignores a negative fd, so the loop keeps running without it.
 int kbd_fd(void);
+
+// Close the current device (if any) and re-run discovery. Call when the main
+// loop sees POLLERR/POLLHUP on kbd_fd() (device unplugged / re-enumerated), or
+// periodically while kbd_fd() is -1. Never exits; leaves fd = -1 if none found.
+void kbd_reopen(void);
 
 // Drains pending input_event structs from the device and decodes them into
 // the internal byte queue that kbd_getc() reads from. Call when poll()

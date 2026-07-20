@@ -95,7 +95,7 @@ static int open_by_id(char *chosen, size_t chosen_sz) {
 // and take the first node that passes the (stricter) keyboard test above.
 static int open_by_scan(char *chosen, size_t chosen_sz) {
     DIR *d = opendir("/dev/input");
-    if (!d) { fprintf(stderr, "kbd: opendir(/dev/input) failed\n"); exit(1); }
+    if (!d) { fprintf(stderr, "kbd: opendir(/dev/input) failed\n"); return -1; }
 
     struct dirent *ent;
     char path[512];
@@ -126,6 +126,20 @@ void kbd_init(void) {
         exit(1);
     }
     report_device(fd, chosen);
+}
+
+// Recover from a disconnect / re-enumeration: drop the dead fd and re-discover.
+// Non-fatal (unlike kbd_init) — a terminal with no keyboard should keep running
+// and reconnect when the keyboard comes back. Modifier state is reset so a key
+// that was "held" when the device vanished doesn't stay stuck.
+void kbd_reopen(void) {
+    if (fd >= 0) { close(fd); fd = -1; }
+    shift_down = ctrl_down = alt_down = 0;
+
+    char chosen[512] = "";
+    fd = open_by_id(chosen, sizeof chosen);
+    if (fd < 0) fd = open_by_scan(chosen, sizeof chosen);
+    if (fd >= 0) report_device(fd, chosen);
 }
 
 int kbd_fd(void) { return fd; }

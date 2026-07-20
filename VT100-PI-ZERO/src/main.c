@@ -115,6 +115,7 @@ int main(void) {
 
     long long next_blink = now_ms() + 500;
     long long flash_until = -1;   // -1 = no visual-bell flash pending
+    long long kbd_retry = 0;      // last keyboard-reopen attempt (ms)
     int blink = 0;
     long long last_out = 0;       // last host-output time (for idle cursor)
     int cur_shown = 0;            // is the cursor currently painted?
@@ -127,6 +128,7 @@ int main(void) {
 
     while (1) {
         pfds[0].fd = serial_fd();    // may change if serial was reopened in Setup
+        pfds[1].fd = kbd_fd();       // -1 while the keyboard is gone; changes on reopen
         pfds[3].fd = netlink_fd();   // changes on connect/disconnect
 
         // Wake on I/O or the vblank flip event; a short timeout keeps a smooth
@@ -135,6 +137,18 @@ int main(void) {
 
         if (pfds[2].revents & POLLIN) textmode_handle_flip();   // a page flip completed
         if (pfds[1].revents & POLLIN) kbd_poll();
+
+        // Keyboard disconnect / re-enumeration (USB suspend, unplug): the fd goes
+        // to POLLERR/POLLHUP, which would otherwise spin poll() at 100% CPU and
+        // leave the keyboard dead forever. Drop it and re-discover; while it stays
+        // gone, kbd_fd() is -1 (poll ignores it) and we retry about once a second.
+        if (pfds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            kbd_reopen();
+            kbd_retry = now_ms();
+        } else if (kbd_fd() < 0 && now_ms() - kbd_retry > 1000) {
+            kbd_reopen();
+            kbd_retry = now_ms();
+        }
 
         if (!booting && kbd_take_setup_toggle()) setup_toggle();
 
@@ -218,14 +232,17 @@ int main(void) {
             cur_shown = 1;
         }
 
-        // Blink / bell timers, only when idle (not in Setup, not mid-slide).
-        if (!setup_active() && !textmode_scroll_busy()) {
+        // Clear a finished visual-bell flash unconditionally: it must expire on
+        // its own 60 ms timer even mid-scroll, or a bell that lands during a
+        // scroll leaves the whole screen inverted (fg/bg swapped) indefinitely.
+        {
             long long t = now_ms();
             if (flash_until >= 0 && t >= flash_until) {
                 textmode_set_flash(0);
                 flash_until = -1;
             }
-            if (t >= next_blink) {
+            // Cursor blink only when idle (not in Setup, not mid-slide).
+            if (!setup_active() && !textmode_scroll_busy() && t >= next_blink) {
                 blink ^= 1;
                 textmode_set_blink(blink);
                 next_blink = t + 500;
