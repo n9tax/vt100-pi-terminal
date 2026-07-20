@@ -261,6 +261,8 @@ void setup_toggle(void) {
         active = 1;
         sel = 0;
         esc = 0;
+        textmode_scroll_snap();   // finish any in-flight slide first, or the menu
+                                  // renders shifted down by the pending scroll offset
         textmode_set_chrome(1);   // Setup always readable, whatever the theme
         draw();
     } else {
