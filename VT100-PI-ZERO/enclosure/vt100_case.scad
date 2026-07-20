@@ -28,17 +28,21 @@ hole_dy = 128;         // mount bolt centres, vertical
 screw_d = 3.2;         // screw clearance (M3 = 3.2)
 
 /* ===================== VT100 PROPORTIONS (reference) ===================== */
-bezel_side   = 56.5;   // screen-to-edge, L/R  (274 wide face for a 161 screen)
-bezel_top    = 20;     // screen-to-edge, top
-bezel_bottom = 27;     // chin
+// The screen sits LEFT of centre on a real VT100: small left margin, wide right
+// cheek (reference: LCD at x=24 in a 274-wide face -> 24 left, 89 right).
+bezel_left   = 24;     // beige margin left of the screen
+bezel_right  = 89;     // beige margin right of the screen (wide right cheek)
+bezel_top    = 19;     // beige margin above the screen
+bezel_bottom = 28;     // chin below the screen
+inset_margin = 11;     // width of the RECESSED DARK BEZEL border around the screen
+inset_depth  = 4.5;    // how deep that dark bezel is set into the face
+inset_r      = 10;     // its corner radius (reference CutOutRadius)
 face_lean    = 11;     // deg the front face leans back
 side_taper   = 1.5;    // deg width taper toward the top
 back_h_frac  = 0.845;  // rear height / front height
 case_depth   = 190;    // front-to-back depth
 wall         = 3;
 edge_r       = 6;      // panel edge rounding (reference CaseRounding)
-recess_d     = 3;      // screen recess depth
-recess_lip   = 6;      // recess frame width
 badge        = "vt100";
 badge_size   = 12;
 
@@ -47,12 +51,13 @@ $fn = 64;
 eps = 0.1;
 
 front_h  = bezel_top + visible_h + bezel_bottom;
-front_wb = max(visible_w + 2*bezel_side, hole_dx + 20);      // bottom width
+front_wb = bezel_left + visible_w + bezel_right;              // bottom width
 front_wt = front_wb - 2*front_h*tan(side_taper);             // top width
 lean     = front_h * tan(face_lean);
 body_d   = max(wall + board_depth + wall, case_depth);
 body_hb  = front_h * back_h_frac;
-screen_cz = bezel_bottom + visible_h/2;
+screen_cx = -front_wb/2 + bezel_left + visible_w/2;          // screen centre, offset LEFT
+screen_cz = bezel_bottom + visible_h/2;                      // screen centre height
 badge_cz  = bezel_bottom/2;
 
 // side profile (depth Y, height Z): front leans back, hood slopes to a short back
@@ -101,12 +106,15 @@ module screen_hole(w, h, depth, rr) {
 }
 
 module screen_cut() {
-    translate([0, -eps, screen_cz]) screen_hole(visible_w, visible_h, 4*wall, 5);
-    translate([0, -eps, screen_cz])
-        screen_hole(visible_w + 2*recess_lip, visible_h + 2*recess_lip, recess_d + eps, 9);
+    // recessed DARK BEZEL: a wide, radiused border set into the face (left-offset)
+    translate([screen_cx, -eps, screen_cz])
+        screen_hole(visible_w + 2*inset_margin, visible_h + 2*inset_margin,
+                    inset_depth + eps, inset_r);
+    // the visible image, bored the rest of the way through
+    translate([screen_cx, -eps, screen_cz]) screen_hole(visible_w, visible_h, 4*wall, 5);
 }
 
-// two full-width bars across the inner face (fuse wall-to-wall), holes drilled
+// two bars across the inner face behind the screen (fuse wall-to-wall), drilled
 module mount_bars() {
     bh = 12;
     for (z = [screen_cz - hole_dy/2, screen_cz + hole_dy/2]) {
@@ -114,7 +122,7 @@ module mount_bars() {
         difference() {
             translate([-(fw - 2*wall + 4)/2, 1.0, z - bh/2])
                 cube([fw - 2*wall + 4, 14, bh]);
-            for (x = [-hole_dx/2, hole_dx/2])
+            for (x = [screen_cx - hole_dx/2, screen_cx + hole_dx/2])
                 translate([x, 1.0 - eps, z]) rotate([-90, 0, 0])
                     cylinder(h = 16, d = screw_d);
         }
@@ -141,9 +149,15 @@ module hood_vents() {
             translate([-sl/2, 0, front_h]) cube([sl, sw, 40]);
 }
 
-module screen_fill() {
-    color([0.05,0.06,0.05]) on_face()
-        translate([0, wall - 0.8, screen_cz]) screen_hole(visible_w-1, visible_h-1, 1, 5);
+module screen_fill() {                          // preview: dark bezel + darker screen
+    on_face() {
+        color([0.10, 0.10, 0.11])               // recessed bezel surround
+            translate([screen_cx, inset_depth - 0.8, screen_cz])
+                screen_hole(visible_w + 2*inset_margin - 1, visible_h + 2*inset_margin - 1, 0.8, inset_r);
+        color([0.02, 0.03, 0.03])               // the screen itself, deeper
+            translate([screen_cx, wall + 1.5, screen_cz])
+                screen_hole(visible_w - 1, visible_h - 1, 0.8, 5);
+    }
 }
 
 /* ===================== ASSEMBLY ===================== */
