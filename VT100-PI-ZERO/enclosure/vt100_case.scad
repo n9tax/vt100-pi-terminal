@@ -1,23 +1,26 @@
 // ===========================================================================
 // VT100-PI-ZERO  --  scaled-down DEC VT100-style enclosure for an LCD panel.
 //
-// A desktop "wedge" shell: vertical screen face, sloped hood, deep chin with a
-// "vt100" deboss. The LCD mounts from behind onto four bolt-bosses; a cavity
-// behind it takes the driver board + Pi Zero, with a cable exit at the rear.
+// Captures the VT100 "look": a front panel that is WIDER THAN TALL with broad
+// side cheeks, a trapezoid that TAPERS INWARD toward the top (~3 deg/side), a
+// recessed screen, a chin with a "vt100" deboss, and a hood that slopes back to
+// a shorter, rounded rear. Proportions follow Michael Gardi's 60%-scale replica
+// / the Cocoacrumbs reference (~274 x 174 front for a 161 x 122 screen).
 //
-// Everything is parametric -- fill in the MEASURE block from your screen and
-// re-render. Units: millimetres. Built/tested on OpenSCAD 2021.01.
+// The LCD mounts from behind onto four bolt-bosses; the cavity behind takes the
+// driver board + Pi Zero, with a rear cable exit. Everything is parametric --
+// fill in the MEASURE block and re-render. Units: mm. OpenSCAD 2021.01.
 //
-//   Preview:  F5      Render (for STL): F6      Export: File > Export > STL
+//   Preview: F5   Render (for STL): F6   Export: File > Export > STL
 // ===========================================================================
 
 /* [What to render] */
-part = "all";          // ["all":Whole case, "body":Shell only, "bezelcheck":Front face only]
+part = "all";          // ["all":Whole case, "bezelcheck":Front slab only]
 
 /* ===================== MEASURE THESE ON YOUR SCREEN ===================== */
 // ---- Lit image area (the actual picture, not the frame) ----
-visible_w = 160;       // image width
-visible_h = 120;       // image height   (VT100 was ~4:3)
+visible_w = 161;       // image width
+visible_h = 122;       // image height   (VT100 was ~4:3)
 
 // ---- LCD module ----
 panel_lip   = 4;       // how far the glass/frame sits proud, front-to-back
@@ -27,54 +30,64 @@ board_depth = 24;      // clear depth needed behind the panel for board + cables
 hole_dx = 176;         // horizontal centre-to-centre of the mount holes
 hole_dy = 128;         // vertical   centre-to-centre of the mount holes
 screw_d = 3.2;         // screw clearance (M3 = 3.2)
-// If your panel mounts by its outer ears rather than tapped holes, just set
-// hole_dx/hole_dy to those ear-hole spacings.
 
-/* ===================== ENCLOSURE STYLING (taste) ===================== */
-bezel_side   = 18;     // screen-to-edge margin, left/right
-bezel_top    = 20;     // screen-to-edge margin, top
-bezel_bottom = 40;     // chin height below the screen (DEC look: bigger)
+/* ===================== ENCLOSURE STYLING (VT100 look) ===================== */
+bezel_side   = 50;     // screen-to-edge margin, left/right  (VT100 has broad cheeks)
+bezel_top    = 24;     // screen-to-edge margin, top
+bezel_bottom = 30;     // chin height below the screen
+side_taper   = 3;      // degrees each side tapers inward toward the top (trapezoid)
+back_taper   = 6;      // extra mm each side the body narrows front-to-back
 wall         = 3;      // shell wall thickness
-corner_r     = 7;      // soft moulded-edge radius
-back_h_frac  = 0.70;   // rear height as a fraction of the front height (the wedge)
-case_depth   = 120;    // overall front-to-back depth for the LOOK (~1/3 of a real
-                       // VT100). The cavity only needs board_depth; this just sets
-                       // how deep the wedge sits. Effective depth = max(the two).
-recess_d     = 2.0;    // depth of the picture-frame recess around the screen
-recess_lip   = 4;      // width of that recess step
+corner_r     = 8;      // soft moulded-edge radius
+back_h_frac  = 0.82;   // rear height as a fraction of front height (gentle hood slope)
+case_depth   = 155;    // front-to-back depth for the LOOK (cavity only needs
+                       // board_depth; effective depth = max(the two)).
+recess_d     = 2.5;    // depth of the picture-frame recess around the screen
+recess_lip   = 5;      // width of that recess step
 boss_len     = 10;     // how far the mount bosses stand off the front wall
 boss_d       = 9;      // mount boss outer diameter
 badge        = "vt100";// chin deboss text ("" to omit)
-badge_size   = 11;
+badge_size   = 12;
 
 /* ===================== DERIVED ===================== */
 $fn = 56;
 eps = 0.1;
 
-front_w = max(visible_w + 2*bezel_side, hole_dx + boss_d + 2*wall);  // ensure bosses fit
-front_h = bezel_top + visible_h + bezel_bottom;
-body_w  = front_w;
-body_d  = max(wall + board_depth + wall, case_depth);   // fit the board, or the looks
-body_h  = front_h;
-body_hb = front_h * back_h_frac;               // rear (short) height
+front_h  = bezel_top + visible_h + bezel_bottom;               // front height
+front_wb = max(visible_w + 2*bezel_side, hole_dx + boss_d + 2*wall);  // bottom width
+top_inset = front_h * tan(side_taper);                         // per-side inward taper
+front_wt = front_wb - 2*top_inset;                             // top width (narrower)
 
-screen_cz = bezel_bottom + visible_h/2;        // screen centre height, from base
-badge_cz  = bezel_bottom/2;                    // chin text height
+body_d  = max(wall + board_depth + wall, case_depth);
+body_hb = front_h * back_h_frac;                               // rear (short) height
+
+screen_cz = bezel_bottom + visible_h/2;                        // screen centre height
+badge_cz  = bezel_bottom/2;
+
+// front-face half-width at a given height z (accounts for the taper)
+function halfw(z) = (front_wb/2) - (front_wb - front_wt)/2 * (z/front_h);
 
 /* ===================== PRIMITIVES ===================== */
 
-// Rounded wedge: tall vertical front face (y=0), sloping top down to a shorter
-// back. Built as the hull of 8 corner spheres so every edge is softly moulded.
-module rounded_wedge(w, d, hf, hb, r) {
-    hull() for (x = [-(w/2 - r), (w/2 - r)]) {
-        translate([x, r,     r     ]) sphere(r);   // front bottom
-        translate([x, r,     hf - r ]) sphere(r);   // front top
-        translate([x, d - r, r     ]) sphere(r);   // back bottom
-        translate([x, d - r, hb - r ]) sphere(r);   // back top
+// Rounded, tapered wedge: trapezoid front face (wide base, narrow top) at y=0,
+// hood sloping down to a shorter, slightly narrower rounded back. Hull of 8
+// corner spheres so every edge is softly moulded.
+module rounded_wedge(wb, wt, d, hf, hb, r) {
+    hull() {
+        // front face (y = r)
+        for (s = [-1, 1]) {
+            translate([s*(wb/2 - r), r, r     ]) sphere(r);   // bottom
+            translate([s*(wt/2 - r), r, hf - r ]) sphere(r);   // top
+        }
+        // back face (y = d - r), narrowed by back_taper and shorter
+        for (s = [-1, 1]) {
+            translate([s*(wb/2 - back_taper - r), d - r, r     ]) sphere(r);   // bottom
+            translate([s*(wt/2 - back_taper - r), d - r, hb - r ]) sphere(r);   // top
+        }
     }
 }
 
-// A rectangular hole with rounded corners, bored along +Y (depth), centred in X/Z.
+// Rectangular hole with rounded corners, bored along +Y, centred in X/Z.
 module screen_hole(w, h, depth, rr) {
     hull() for (x = [-1, 1], z = [-1, 1])
         translate([x*(w/2 - rr), 0, z*(h/2 - rr)])
@@ -84,12 +97,10 @@ module screen_hole(w, h, depth, rr) {
 /* ===================== FEATURES ===================== */
 
 module screen_cut() {
-    // through-hole for the image
-    translate([0, -eps, screen_cz])
+    translate([0, -eps, screen_cz])                            // image through-hole
         screen_hole(visible_w, visible_h, wall + 2*eps, 5);
-    // shallow picture-frame recess on the outside
-    translate([0, -eps, screen_cz])
-        screen_hole(visible_w + 2*recess_lip, visible_h + 2*recess_lip, recess_d + eps, 7);
+    translate([0, -eps, screen_cz])                            // picture-frame recess
+        screen_hole(visible_w + 2*recess_lip, visible_h + 2*recess_lip, recess_d + eps, 8);
 }
 
 module mount_bosses() {
@@ -101,20 +112,17 @@ module mount_bosses() {
             }
 }
 
-// centred rear cable slot for HDMI / USB / power, low on the back wall
-module cable_slot() {
+module cable_slot() {                                          // rear exit, low centre
     slot_w = 46; slot_h = 20;
     translate([-slot_w/2, body_d - wall - eps, wall + 6])
         cube([slot_w, wall + 2*eps, slot_h]);
 }
 
-module hood_vents() {
-    // a row of slots cut into the sloping hood for airflow
-    n = 7; sw = 3; sl = min(60, body_w - 4*bezel_side);
+module hood_vents() {                                          // slots in the sloping hood
+    n = 9; sw = 3.5; sl = 55;
     for (i = [0 : n-1])
-        translate([ (i - (n-1)/2) * (sw*2.2), body_d*0.45, body_h - 2 ])
-            rotate([0,0,0])
-            cube([sw, sl, wall*3], center = true);
+        translate([(i - (n-1)/2) * (sw*2.4), body_d*0.55, front_h - 6])
+            rotate([28, 0, 0]) cube([sw, sl, wall*4], center = true);
 }
 
 module badge_deboss() {
@@ -130,11 +138,10 @@ module badge_deboss() {
 
 module shell() {
     difference() {
-        rounded_wedge(body_w, body_d, body_h, body_hb, corner_r);
-        // hollow it out
-        translate([0, wall, wall])
-            rounded_wedge(body_w - 2*wall, body_d - 2*wall,
-                          body_h - 2*wall, body_hb - 2*wall, max(1, corner_r - wall));
+        rounded_wedge(front_wb, front_wt, body_d, front_h, body_hb, corner_r);
+        translate([0, wall, wall])                             // hollow
+            rounded_wedge(front_wb - 2*wall, front_wt - 2*wall, body_d - 2*wall,
+                          front_h - 2*wall, body_hb - 2*wall, max(1, corner_r - wall));
         screen_cut();
         cable_slot();
         hood_vents();
@@ -143,15 +150,16 @@ module shell() {
     mount_bosses();
 }
 
-module bezelcheck() {
-    // just the front slab, to eyeball screen/bezel/bolt alignment quickly
+module bezelcheck() {                                          // front slab for quick checks
     difference() {
-        translate([-body_w/2, 0, 0]) cube([body_w, wall, body_h]);
+        hull() for (s = [-1, 1]) {
+            translate([s*(front_wb/2 - corner_r), 0, corner_r]) cylinder(r = corner_r, h = wall);
+            translate([s*(front_wt/2 - corner_r), 0, front_h - corner_r]) cylinder(r = corner_r, h = wall);
+        }
         screen_cut();
     }
     mount_bosses();
 }
 
-if      (part == "all")        shell();
-else if (part == "body")       shell();
-else if (part == "bezelcheck") bezelcheck();
+if      (part == "bezelcheck") bezelcheck();
+else                           shell();
