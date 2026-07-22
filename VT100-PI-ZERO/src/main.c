@@ -7,9 +7,15 @@
 // and no on-screen Setup menu yet (see ../README.md for the build order).
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <poll.h>
 #include <time.h>
+#include <signal.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/kd.h>
 
 #include "config.h"
 #include "settings.h"
@@ -54,6 +60,32 @@ static long long now_ms(void) {
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+// ---- console / signal ownership --------------------------------------------
+// We own the display via DRM/KMS, but systemd still hands us tty1 as our
+// controlling terminal. Two hazards follow: (1) a hangup on tty1 -- which the
+// kernel raises on things like a getty grabbing the VT, or a login shell's
+// session ending -- would SIGHUP us dead (systemd then reports a clean exit and
+// restarts, and the tty1 text console with its leftover "Wait" banner shows in
+// the gap); (2) with the VT in text mode, fbcon repaints the console over our
+// scanout on any console activity. Ignore the hangup, and put the VT in
+// KD_GRAPHICS so the kernel stops drawing the text console entirely. Restore
+// KD_TEXT on a clean stop (systemctl stop = SIGTERM) so the console stays usable.
+static int console_tty = -1;
+static void console_restore(void) {
+    if (console_tty >= 0) ioctl(console_tty, KDSETMODE, KD_TEXT);
+}
+static void console_on_term(int sig) { (void)sig; console_restore(); _exit(0); }
+
+static void console_take(void) {
+    signal(SIGHUP,  SIG_IGN);   // a tty1 hangup must not kill the terminal
+    signal(SIGPIPE, SIG_IGN);   // a write to a dead PTY/socket must not kill us
+    console_tty = open("/dev/tty1", O_RDWR | O_CLOEXEC | O_NOCTTY);
+    if (console_tty >= 0) ioctl(console_tty, KDSETMODE, KD_GRAPHICS);
+    signal(SIGTERM, console_on_term);
+    signal(SIGINT,  console_on_term);
+    atexit(console_restore);
+}
+
 // ---- serial input ring -----------------------------------------------------
 // Decouples bursty serial arrival from the paced feed into the terminal: raw
 // bytes land here, then are metered into vt100_feed() so smooth scroll can slide
@@ -86,6 +118,7 @@ static int inbuf_pop(void) {
 static void net_emit(uint8_t b) { inbuf_push(b); }
 
 int main(void) {
+    console_take();                         // survive tty1 hangups; stop fbcon drawing over us
     settings_load();                        // ~/.config/vt100-pi/vt100.conf -> g_settings
 
     textmode_init();                        // reads g_settings.font_path via glyphs.c
