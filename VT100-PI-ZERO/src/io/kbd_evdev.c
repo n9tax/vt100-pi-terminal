@@ -2,6 +2,7 @@
 #include "terminal/vt100.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <string.h>
 #include <stdio.h>
@@ -62,6 +63,17 @@ static void report_device(int the_fd, const char *path) {
     char name[256] = "?";
     ioctl(the_fd, EVIOCGNAME(sizeof name), name);
     fprintf(stderr, "kbd: using %s (%s)\n", path, name);
+}
+
+// Grab the device exclusively. Without this, keystrokes ALSO reach the kernel
+// console on tty1 -- which wakes fbcon and makes it repaint the text console
+// (the leftover boot "Wait" banner) right over our KMS output, and lets stray
+// Ctrl+Alt+Fn switch VTs. The grab is released automatically when fd is closed.
+static void grab_device(void) {
+    if (fd < 0) return;
+    if (ioctl(fd, EVIOCGRAB, (void *)1) < 0)
+        fprintf(stderr, "kbd: EVIOCGRAB failed: %s (keys may leak to the console)\n",
+                strerror(errno));
 }
 
 // udev names the real typing interface /dev/input/by-id/*-event-kbd (the other
@@ -126,6 +138,7 @@ void kbd_init(void) {
         exit(1);
     }
     report_device(fd, chosen);
+    grab_device();
 }
 
 // Recover from a disconnect / re-enumeration: drop the dead fd and re-discover.
@@ -139,7 +152,7 @@ void kbd_reopen(void) {
     char chosen[512] = "";
     fd = open_by_id(chosen, sizeof chosen);
     if (fd < 0) fd = open_by_scan(chosen, sizeof chosen);
-    if (fd >= 0) report_device(fd, chosen);
+    if (fd >= 0) { report_device(fd, chosen); grab_device(); }
 }
 
 int kbd_fd(void) { return fd; }
