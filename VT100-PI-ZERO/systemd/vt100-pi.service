@@ -1,17 +1,21 @@
 [Unit]
 Description=VT100-PI-ZERO hardware terminal
-Conflicts=getty@tty1.service
-After=getty@tty1.service systemd-udevd.service
+After=systemd-udevd.service
 Wants=systemd-udevd.service
+
+# No Conflicts=/After=getty@tty1 and no controlling tty: the app owns the display
+# via DRM/KMS, opens /dev/tty1 itself (for KD_GRAPHICS), and reads the keyboard via
+# evdev. Tying it to tty1 as its controlling terminal (StandardInput=tty) let a tty
+# hangup / a logind autovt getty stop the service -- which a manual run never hit.
+# For a clean kiosk, also: systemctl mask getty@tty1.service
 
 [Service]
 ExecStart=/usr/local/bin/vt100-pi-zero
 Restart=always
 RestartSec=1
 User=root
-TTYPath=/dev/tty1
-StandardInput=tty
-StandardOutput=tty
+StandardInput=null
+StandardOutput=journal
 StandardError=journal
 
 [Install]

@@ -18,11 +18,15 @@
 #define WAIT_UNIT_PATH "/etc/systemd/system/" WAIT_NAME
 #define WAIT_BIN       "/usr/local/bin/vt100-wait"
 
+// No Conflicts=/After=getty@tty1 and no controlling tty: the app owns the
+// display via DRM/KMS and opens /dev/tty1 itself (for KD_GRAPHICS), and reads
+// the keyboard via evdev -- it needs neither tty1 as stdio nor to fight getty.
+// Tying it to tty1 as its controlling terminal (StandardInput=tty) let a tty
+// hangup / a logind autovt getty stop the service, which a manual run never hit.
 static const char *UNIT_TEXT =
     "[Unit]\n"
     "Description=VT100-PI-ZERO hardware terminal\n"
-    "Conflicts=getty@tty1.service\n"
-    "After=getty@tty1.service systemd-udevd.service\n"
+    "After=systemd-udevd.service\n"
     "Wants=systemd-udevd.service\n"
     "\n"
     "[Service]\n"
@@ -30,9 +34,8 @@ static const char *UNIT_TEXT =
     "Restart=always\n"
     "RestartSec=1\n"
     "User=root\n"
-    "TTYPath=/dev/tty1\n"
-    "StandardInput=tty\n"
-    "StandardOutput=tty\n"
+    "StandardInput=null\n"
+    "StandardOutput=journal\n"
     "StandardError=journal\n"
     "\n"
     "[Install]\n"
@@ -165,7 +168,8 @@ int service_boot_enabled(void) {
 int service_set_boot(int on) {
     if (!on) {
         system("systemctl disable " UNIT_NAME " 2>/dev/null");
-        system("systemctl enable getty@tty1.service 2>/dev/null");   // restore console login
+        system("systemctl unmask getty@tty1.service 2>/dev/null");   // restore console login
+        system("systemctl enable getty@tty1.service 2>/dev/null");
         remove_wait_banner();                                        // drop the Wait. banner
         restore_boot();                                              // un-quiet the boot
         return 0;
@@ -201,7 +205,9 @@ int service_set_boot(int on) {
         fprintf(stderr, "service: enable %s failed; leaving getty@tty1 in place\n", UNIT_NAME);
         return -1;
     }
-    system("systemctl disable getty@tty1.service 2>/dev/null");   // free tty1 for next boot
+    // Mask (not just disable) so logind's autovt can't spawn a getty on tty1,
+    // which would grab the VT back and reset it out of KD_GRAPHICS.
+    system("systemctl mask getty@tty1.service 2>/dev/null");
     quiet_boot();                                                 // hide the Linux boot chatter
     remove_wait_banner();                                         // ensure the old banner is gone
     return 0;
