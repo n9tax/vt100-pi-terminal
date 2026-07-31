@@ -117,6 +117,11 @@ static int inbuf_pop(void) {
 // the same paced feed / smooth scroll.
 static void net_emit(uint8_t b) { inbuf_push(b); }
 
+// Main-loop poll() slots: 0 = serial, 1 = DRM page-flip events, 2 = network,
+// 3.. = keyboard nodes (a composite keyboard contributes several).
+#define PFD_KBD0  3
+#define PFD_COUNT (PFD_KBD0 + KBD_MAX_DEVS)
+
 int main(void) {
     console_take();                         // survive tty1 hangups; stop fbcon drawing over us
     settings_load();                        // ~/.config/vt100-pi/vt100.conf -> g_settings
@@ -148,38 +153,38 @@ int main(void) {
 
     long long next_blink = now_ms() + 500;
     long long flash_until = -1;   // -1 = no visual-bell flash pending
-    long long kbd_retry = 0;      // last keyboard-reopen attempt (ms)
+    long long kbd_retry = 0;      // last keyboard-rescan time (ms)
     int blink = 0;
     long long last_out = 0;       // last host-output time (for idle cursor)
     int cur_shown = 0;            // is the cursor currently painted?
 
-    struct pollfd pfds[4];
-    pfds[0].fd = serial_fd();          pfds[0].events = POLLIN;
-    pfds[1].fd = kbd_fd();             pfds[1].events = POLLIN;
-    pfds[2].fd = textmode_drm_fd();    pfds[2].events = POLLIN;   // page-flip events
-    pfds[3].fd = netlink_fd();         pfds[3].events = POLLIN;   // -1 when not connected
+    // Unused keyboard slots stay at -1, which poll() ignores.
+    struct pollfd pfds[PFD_COUNT];
+    for (int i = 0; i < PFD_COUNT; ++i) { pfds[i].fd = -1; pfds[i].events = POLLIN; }
+    pfds[1].fd = textmode_drm_fd();
 
     while (1) {
         pfds[0].fd = serial_fd();    // may change if serial was reopened in Setup
-        pfds[1].fd = kbd_fd();       // -1 while the keyboard is gone; changes on reopen
-        pfds[3].fd = netlink_fd();   // changes on connect/disconnect
+        pfds[2].fd = netlink_fd();   // changes on connect/disconnect
+        for (int i = 0; i < KBD_MAX_DEVS; ++i)
+            pfds[PFD_KBD0 + i].fd = kbd_fd_at(i);   // -1 past the open count
 
         // Wake on I/O or the vblank flip event; a short timeout keeps a smooth
         // scroll advancing when nothing else is happening.
-        poll(pfds, 4, (textmode_scroll_busy() || textmode_flip_pending()) ? 15 : 50);
+        poll(pfds, PFD_COUNT, (textmode_scroll_busy() || textmode_flip_pending()) ? 15 : 50);
 
-        if (pfds[2].revents & POLLIN) textmode_handle_flip();   // a page flip completed
-        if (pfds[1].revents & POLLIN) kbd_poll();
+        if (pfds[1].revents & POLLIN) textmode_handle_flip();   // a page flip completed
 
-        // Keyboard disconnect / re-enumeration (USB suspend, unplug): the fd goes
-        // to POLLERR/POLLHUP, which would otherwise spin poll() at 100% CPU and
-        // leave the keyboard dead forever. Drop it and re-discover; while it stays
-        // gone, kbd_fd() is -1 (poll ignores it) and we retry about once a second.
-        if (pfds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-            kbd_reopen();
-            kbd_retry = now_ms();
-        } else if (kbd_fd() < 0 && now_ms() - kbd_retry > 1000) {
-            kbd_reopen();
+        // Any keyboard event -- readable or in error. kbd_poll() decodes what it
+        // can and drops nodes that have gone away (USB suspend, unplug), which
+        // would otherwise spin poll() at 100% CPU on POLLERR forever.
+        for (int i = 0; i < KBD_MAX_DEVS; ++i)
+            if (pfds[PFD_KBD0 + i].revents) { kbd_poll(); break; }
+
+        // Pick up keyboards plugged in after boot (and re-adopt one that
+        // re-enumerated) about once a second.
+        if (now_ms() - kbd_retry > 1000) {
+            kbd_rescan();
             kbd_retry = now_ms();
         }
 
