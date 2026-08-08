@@ -9,3 +9,8 @@ Thumbs.db
 # Local developer notes — not part of the project
 NOTES.md
 .notes/
+
+# Third-party 3D models downloaded for reference (someone else's work, not ours
+# to redistribute). Our own case lives in enclosure/.
+STL/
+2-3-Scale-VT100-Terminal-Reproduction-1.0.zip
