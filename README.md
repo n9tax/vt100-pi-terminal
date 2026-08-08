@@ -55,8 +55,13 @@ project's own README, linked above.
 ```
 VT100-PI/         Bare-metal Pico 2 W firmware (Pico SDK / CMake)
 VT100-PI-ZERO/    Raspberry Pi OS userspace terminal (CMake)
+enclosure/        3D-printable case: OpenSCAD source + exported STLs
 .github/workflows/  CI: aarch64 build for VT100-PI-ZERO, Pico SDK cross-build for VT100-PI
 ```
+
+The enclosure is board-agnostic — it houses whichever build is driving the
+terminal, around the 10.4" 4:3 panel linked in
+[VT100-PI-ZERO/README.md](VT100-PI-ZERO/README.md#hardware).
 
 `VT100-PI/lib/Pico-PIO-USB` is a git submodule (vendored third-party PIO-USB
 host library) — clone with `git clone --recurse-submodules`, or run

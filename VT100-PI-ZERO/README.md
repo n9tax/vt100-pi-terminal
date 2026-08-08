@@ -15,7 +15,11 @@ below.
 ## Hardware
 
 - Raspberry Pi Zero 2 W
-- HDMI/DVI monitor on the Zero 2 W's mini-HDMI port
+- HDMI/DVI monitor on the Zero 2 W's mini-HDMI port. This build uses a
+  [VSDISPLAY 10.4" 1024x768 IPS panel](https://www.amazon.com/dp/B07WCH53TK)
+  with its HDMI controller board — 4:3 like the original VT100, and 768/24
+  divides to exactly 32 pixels per text row. Any HDMI display works though:
+  the mode is negotiated at runtime via DRM/KMS, not fixed at compile time.
 - RS232 hat (Waveshare-style) wired to the GPIO UART, presented as
   `/dev/serial0`
 - Any USB keyboard, plugged into the Zero 2 W's USB port
