@@ -1,0 +1,111 @@
+name: Release
+
+# Cuts a GitHub Release from a version tag, with a ready-to-flash binary for
+# each board attached. The per-project CI workflows still run on every push and
+# only upload workflow artifacts (login-gated, expire after 90 days); this is
+# the workflow that produces the public, permanent downloads the READMEs point
+# people at.
+#
+#   git tag -a v0.1.0 -m "..." && git push origin v0.1.0 && git push github v0.1.0
+#
+# Both builds must succeed before the release is created -- `needs` on the
+# publish job means a broken board build leaves no half-populated release
+# behind.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and release (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write   # required to create the release and upload assets
+
+jobs:
+  # Bare-metal Pico 2 W firmware. Cross-built with arm-none-eabi; the Pico SDK
+  # is fetched at the tag pinned in VT100-PI/CMakeLists.txt.
+  build-pico:
+    runs-on: ubuntu-latest
+    env:
+      PICO_SDK_FETCH_FROM_GIT: 1
+      PICO_SDK_FETCH_FROM_GIT_TAG: "2.3.0"   # matches sdkVersion in VT100-PI/CMakeLists.txt
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          submodules: recursive   # pulls in lib/Pico-PIO-USB
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential python3
+
+      - name: Configure
+        run: cmake -S VT100-PI -B VT100-PI/build -G Ninja
+
+      - name: Build
+        run: cmake --build VT100-PI/build --verbose
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-pico
+          path: |
+            VT100-PI/build/VT100-PI.uf2
+            VT100-PI/build/VT100-PI.elf
+
+  # Pi Zero 2 W userspace binary. Built natively on an ARM64 runner so the
+  # output is a real aarch64 ELF that runs on the Pi -- an x86_64 compile-check
+  # would be useless as a release asset.
+  build-zero:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libdrm-dev libfreetype-dev pkg-config
+
+      - name: Configure
+        run: cmake -S VT100-PI-ZERO -B VT100-PI-ZERO/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build VT100-PI-ZERO/build --verbose
+
+      - name: Name the asset for its architecture
+        run: |
+          file VT100-PI-ZERO/build/vt100-pi-zero
+          file VT100-PI-ZERO/build/vt100-pi-zero | grep -q aarch64 \
+            || { echo "::error::built binary is not aarch64 -- wrong runner?"; exit 1; }
+          cp VT100-PI-ZERO/build/vt100-pi-zero vt100-pi-zero-aarch64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-zero
+          path: vt100-pi-zero-aarch64
+
+  publish:
+    needs: [build-pico, build-zero]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: List what is being published
+        run: ls -lh dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/VT100-PI.uf2
+            dist/VT100-PI.elf
+            dist/vt100-pi-zero-aarch64

@@ -32,8 +32,13 @@ for exactly what ported unmodified versus what's new.
 ## Install
 
 The fastest path for either board is a prebuilt binary from
-[Releases](../../releases) — every push to `main` rebuilds both projects in
-CI and attaches the output. No toolchain needed.
+[Releases](../../releases). Each tagged version attaches a ready-to-flash
+`VT100-PI.uf2` for the Pico and an aarch64 `vt100-pi-zero-aarch64` for the
+Zero, both built in CI from that tag. No toolchain needed.
+
+Pushes to `main` also run a CI build of whichever project changed, but those
+upload *workflow artifacts* — they need a GitHub login to download and expire
+after 90 days. For a permanent download, use a release.
 
 **VT100-PI (Pico 2 W):** download `VT100-PI.uf2` from the latest release,
 hold BOOTSEL while plugging the Pico in over USB (it mounts as `RPI-RP2`),
