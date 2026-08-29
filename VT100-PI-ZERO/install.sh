@@ -146,6 +146,24 @@ if [ "$DO_KIOSK" -eq 1 ]; then
     $SUDO systemctl disable --now getty@tty1.service 2>/dev/null || true
     $SUDO systemctl mask getty@tty1.service
     info "text console on tty1 is now off (unmask to undo)"
+elif ! systemctl is-enabled getty@tty1.service 2>/dev/null | grep -q masked; then
+    # The single most common way this install looks broken afterwards: the login
+    # console takes tty1 back and the monitor shows a login prompt instead of the
+    # terminal. It is not a crash and the journal shows nothing, so say it here.
+    say "Warning: getty@tty1 is not masked"
+    info "The login console will fight the terminal for the display, and the"
+    info "monitor will drop back to a login prompt. To stop that:"
+    info "  ./install.sh --kiosk        (or: sudo systemctl mask getty@tty1.service)"
+    info "Undo later with: sudo systemctl unmask --now getty@tty1.service"
+fi
+
+# A desktop image is the other way the display gets taken: X/Wayland holds DRM
+# master and the input devices, and this program cannot run under it at all.
+if systemctl get-default 2>/dev/null | grep -q graphical; then
+    say "Warning: this system boots to a graphical target"
+    info "A desktop session holds DRM master and the keyboard, so the terminal"
+    info "cannot own the display. Raspberry Pi OS *Lite* is the target. To switch:"
+    info "  sudo systemctl set-default multi-user.target && sudo reboot"
 fi
 
 # ---- serial pre-flight ----------------------------------------------------
