@@ -118,9 +118,18 @@ static int inbuf_pop(void) {
 static void net_emit(uint8_t b) { inbuf_push(b); }
 
 // Main-loop poll() slots: 0 = serial, 1 = DRM page-flip events, 2 = network,
-// 3.. = keyboard nodes (a composite keyboard contributes several).
-#define PFD_KBD0  3
+// 3 = keyboard hotplug (inotify), 4.. = keyboard nodes (a composite keyboard
+// contributes several).
+#define PFD_HOTPLUG 3
+#define PFD_KBD0  4
 #define PFD_COUNT (PFD_KBD0 + KBD_MAX_DEVS)
+
+// Safety-net rescan interval. Hotplug is event-driven via inotify; this only
+// covers the case where inotify could not be started, and is gated on not being
+// mid-scroll. It used to run every second unconditionally, which put a ~1 Hz
+// stutter into smooth scrolling -- a fixed number of lines apart at any given
+// scroll speed, which is exactly what it looked like on screen.
+#define KBD_RESCAN_MS 5000
 
 int main(void) {
     console_take();                         // survive tty1 hangups; stop fbcon drawing over us
@@ -160,6 +169,7 @@ int main(void) {
     struct pollfd pfds[PFD_COUNT];
     for (int i = 0; i < PFD_COUNT; ++i) { pfds[i].fd = -1; pfds[i].events = POLLIN; }
     pfds[1].fd = textmode_drm_fd();
+    pfds[PFD_HOTPLUG].fd = kbd_hotplug_fd();   // -1 if inotify is unavailable
 
     while (1) {
         pfds[0].fd = serial_fd();    // may change if serial was reopened in Setup
@@ -180,10 +190,21 @@ int main(void) {
             if (pfds[PFD_KBD0 + i].revents) { kbd_poll(); break; }
 
         // Pick up keyboards plugged in after boot (and re-adopt one that
-        // re-enumerated) about once a second.
-        if (now_ms() - kbd_retry > 1000) {
-            kbd_rescan();
-            kbd_retry = now_ms();
+        // re-enumerated). Normally this is driven by the inotify watch, which
+        // costs nothing until a device actually appears. The timer is only a
+        // fallback for when inotify could not be started -- and both paths stay
+        // off the critical path of a slide, because a scan is expensive enough
+        // to drop a frame and show up as a stutter mid-scroll.
+        // Drain unconditionally -- an undrained inotify fd stays readable and
+        // would spin poll() -- then do the actual scan only when no slide is in
+        // flight, so its cost can never land mid-scroll.
+        if (pfds[PFD_HOTPLUG].revents & POLLIN) kbd_handle_hotplug();
+        if (!textmode_scroll_busy()) {
+            kbd_hotplug_settle();
+            if (kbd_hotplug_fd() < 0 && now_ms() - kbd_retry > KBD_RESCAN_MS) {
+                kbd_rescan();                  // no inotify: fall back to the timer
+                kbd_retry = now_ms();
+            }
         }
 
         if (!booting && kbd_take_setup_toggle()) setup_toggle();

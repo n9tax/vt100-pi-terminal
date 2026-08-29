@@ -27,9 +27,24 @@ void kbd_init(void);
 int kbd_fd_count(void);
 int kbd_fd_at(int i);
 
-// Reap devices that have gone away and pick up newly plugged-in ones. Cheap
-// (an opendir plus a few ioctls); call about once a second from the main loop.
+// Reap devices that have gone away and pick up newly plugged-in ones. NOT cheap:
+// it re-open()s and re-probes every node not already adopted, which overruns the
+// frame budget. Drive it from kbd_handle_hotplug(), and only ever call it
+// directly as a slow safety net while no scroll is in flight.
 void kbd_rescan(void);
+
+// Hotplug watch: an inotify fd on /dev/input for the main poll() set, so devices
+// are picked up when they appear instead of by polling. -1 if inotify could not
+// be started, in which case the periodic kbd_rescan() is the only path.
+int  kbd_hotplug_fd(void);
+
+// Drain the hotplug queue. Call whenever kbd_hotplug_fd() is readable, and do
+// not skip it: an undrained inotify fd stays readable and spins poll().
+void kbd_handle_hotplug(void);
+
+// Run the scan the drained events asked for, if any. Call when it is a good
+// moment (not mid-scroll) -- a scan is expensive enough to drop a frame.
+void kbd_hotplug_settle(void);
 
 // Drain pending input_event structs from every open device and decode them into
 // the internal byte queue that kbd_getc() reads from. Call when poll() reports

@@ -10,6 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/inotify.h>
 #include <linux/input.h>
 
 static int shift_down, ctrl_down, alt_down, caps_lock;
@@ -18,6 +19,15 @@ static int setup_toggle_flag;   // set on Ctrl+F3, consumed by the main loop
 // Every open typing node. A composite keyboard contributes more than one.
 static struct { int fd; char path[512]; } devs[KBD_MAX_DEVS];
 static int ndevs;
+
+// Hotplug watch on /dev/input. Rescanning on a timer meant re-open()ing and
+// re-probing every non-keyboard node (mouse, HDMI CEC, power button) once a
+// second, in the middle of the render loop -- enough to blow the frame budget
+// and put a visible stutter into a smooth scroll at a steady ~1 Hz. inotify
+// costs nothing until a device actually appears.
+static int hotplug_fd = -1;
+static int hotplug_dirty;         // a device changed; a scan is owed
+static void hotplug_init(void);   // defined below, next to the other hotplug code
 
 // Small output ring; a human typing (or even pasting) can't outrun this
 // between poll() iterations.
@@ -147,6 +157,7 @@ static void scan_devices(void) {
 }
 
 void kbd_init(void) {
+    hotplug_init();
     scan_devices();
     if (ndevs == 0)
         fprintf(stderr, "kbd: no keyboard found under /dev/input — "
@@ -154,6 +165,48 @@ void kbd_init(void) {
 }
 
 void kbd_rescan(void) { scan_devices(); }
+
+int kbd_hotplug_fd(void) { return hotplug_fd; }
+
+static void hotplug_init(void) {
+    hotplug_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (hotplug_fd < 0) {
+        fprintf(stderr, "kbd: inotify_init1 failed: %s (falling back to periodic rescans)\n",
+                strerror(errno));
+        return;
+    }
+    // IN_ATTRIB matters as much as IN_CREATE: udev creates the node and then
+    // fixes its permissions, so the node can exist a moment before it is usable.
+    if (inotify_add_watch(hotplug_fd, "/dev/input",
+                          IN_CREATE | IN_ATTRIB | IN_MOVED_TO | IN_DELETE) < 0) {
+        fprintf(stderr, "kbd: watch on /dev/input failed: %s (falling back to periodic rescans)\n",
+                strerror(errno));
+        close(hotplug_fd);
+        hotplug_fd = -1;
+    }
+}
+
+// Always drain when the fd is readable, even if the scan has to wait: an
+// undrained inotify fd stays readable forever, which would make poll() return
+// immediately every iteration and spin the main loop at 100% CPU.
+void kbd_handle_hotplug(void) {
+    if (hotplug_fd < 0) return;
+    char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+    for (;;) {
+        ssize_t n = read(hotplug_fd, buf, sizeof buf);
+        if (n > 0) { hotplug_dirty = 1; continue; }
+        break;                    // drained (EAGAIN), or an error we retry next poll
+    }
+}
+
+// Do the owed scan. Separate from the drain so the caller can keep it off the
+// critical path of a slide; a burst of events (udev creating several nodes for
+// one keyboard) collapses into a single scan here.
+void kbd_hotplug_settle(void) {
+    if (!hotplug_dirty) return;
+    hotplug_dirty = 0;
+    scan_devices();
+}
 
 int kbd_fd_count(void) { return ndevs; }
 int kbd_fd_at(int i) { return (i >= 0 && i < ndevs) ? devs[i].fd : -1; }
