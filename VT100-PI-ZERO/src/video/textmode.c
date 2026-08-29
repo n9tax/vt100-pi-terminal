@@ -65,6 +65,7 @@ static int step_acc = 0;            // fractional-pixel accumulator for base_ste
 static int d = 0;                   // pixels left to settle (>0 = a slide in flight)
 static int backlog_lines = 0;       // lines still buffered in the serial ring (look-ahead)
 static int exact_rows = 1;          // 1 when line_h*ROWS == fb_height (no scroll drift)
+static int scroll_depth = 2;        // lines of slide allowed in flight (settings)
 
 // ---- palette ---------------------------------------------------------------
 // Fixed high-contrast palette for the Setup menu ("chrome"), so a bad terminal
@@ -412,7 +413,16 @@ void textmode_set_backlog(int lines) { backlog_lines = lines < 0 ? 0 : lines; }
 // True while there's room to feed another line into the animation. The main loop
 // gates paced feeding on this so at most ~2 lines slide at once and the ring
 // absorbs the rest. When smooth scroll is off, always feed (no pacing).
-int textmode_feed_room(void) { return !smooth_on || d < 2 * line_h; }
+int textmode_feed_room(void) { return !smooth_on || d < scroll_depth * line_h; }
+
+// Pacing depth from settings, clamped to what the scroll headroom can hold: a
+// slide deeper than MAXPEND rows would trip the settle-to-jump check in
+// textmode_smooth_line() on every line and never animate at all.
+void textmode_set_scroll_depth(int lines) {
+    if (lines < 1) lines = 1;
+    if (lines > MAXPEND - 1) lines = MAXPEND - 1;
+    scroll_depth = lines;
+}
 
 // ---- present / page flip (double-buffered, vsync) --------------------------
 static void on_flip(int fd, unsigned seq, unsigned s, unsigned us, void *data) {

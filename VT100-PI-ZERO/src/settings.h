@@ -18,6 +18,8 @@ typedef struct {
     char bg_hex[8];         // custom-theme background "#RRGGBB"
     int  smooth_scroll;     // 0/1
     int  scroll_speed;      // pixels/second
+    int  scroll_depth;      // lines of slide allowed in flight (pacing depth)
+    int  scroll_dump;       // backlog in lines past which we dump-and-reset
     char telnet_host[128];  // "" = use serial; else connect Telnet on boot
     int  telnet_port;       // default 23
     char ssh_host[128];     // "" = none; else "host"/"user@host", connect ssh on boot

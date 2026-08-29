@@ -20,6 +20,7 @@
 #include "config.h"
 #include "settings.h"
 #include "setup.h"
+#include "flow.h"
 #include "video/textmode.h"
 #include "io/serial_linux.h"
 #include "io/kbd_evdev.h"
@@ -91,7 +92,6 @@ static void console_take(void) {
 // bytes land here, then are metered into vt100_feed() so smooth scroll can slide
 // cleanly and read the buffered line count as look-ahead for its speed.
 #define INBUF_SIZE 65536
-#define DUMP_LINES 80           // buffered lines past which we dump-and-reset (overrun)
 static uint8_t inbuf[INBUF_SIZE];
 static int inbuf_head, inbuf_tail;
 static int inbuf_nl;                 // running count of buffered newlines (look-ahead)
@@ -141,6 +141,7 @@ int main(void) {
     textmode_set_theme(g_settings.theme);
     textmode_set_cursor_style(g_settings.cursor_style);
     textmode_set_smooth(g_settings.smooth_scroll, g_settings.scroll_speed);
+    textmode_set_scroll_depth(g_settings.scroll_depth);
     serial_init(g_settings.serial_dev, g_settings.baud);
     kbd_init();
     screen_init();
@@ -247,24 +248,32 @@ int main(void) {
                 while ((c = serial_getc()) >= 0) inbuf_push((uint8_t)c);
             }
 
-            // Feed the terminal from the ring. Normally paced so at most ~2 lines
-            // slide at once and the ring absorbs the burst; but once more than
-            // DUMP_LINES are buffered the scroll can't keep up at a constant speed,
-            // so dump the whole ring and let it reset (like a real terminal
-            // overrunning) rather than lag seconds behind.
+            // Feed the terminal from the ring. Normally paced so at most
+            // scroll_depth lines slide at once and the ring absorbs the burst;
+            // but once more than scroll_dump are buffered the scroll can't keep
+            // up at a constant speed, so dump the whole ring and let it reset
+            // (like a real terminal overrunning) rather than lag seconds behind.
             textmode_set_backlog(inbuf_pending_lines());
-            if (inbuf_pending_lines() > DUMP_LINES) {
+            int fed = 0;
+            if (inbuf_pending_lines() > g_settings.scroll_dump) {
+                flow_note_overrun();
                 while (!inbuf_empty()) {
                     if (!activity) { screen_hide_cursor(); activity = 1; cur_shown = 0; }
                     vt100_feed((uint8_t)inbuf_pop());
+                    fed = 1;
                 }
             } else {
                 while (!inbuf_empty() && textmode_feed_room()) {
                     if (!activity) { screen_hide_cursor(); activity = 1; cur_shown = 0; }
                     vt100_feed((uint8_t)inbuf_pop());
+                    fed = 1;
                 }
             }
             textmode_set_backlog(inbuf_pending_lines());
+            // Sampled here, in the terminal branch only: while Setup owns the
+            // screen the ring is not drained, so sampling there would read as a
+            // growing overrun that is really just the menu being open.
+            flow_sample(inbuf_pending_lines(), textmode_scroll_busy(), fed);
 
             // Keyboard -> host, + optional local echo.
             uint8_t kb[64]; int kn = 0, k;

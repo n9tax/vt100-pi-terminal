@@ -49,6 +49,30 @@
 #define SMOOTH_SCROLL_DEFAULT 1
 #define SCROLL_SPEED_DEFAULT  300
 
+// Pacing depth: how many lines of slide may be in flight at once. This is the
+// buffer between the host and the glass. Higher lets more of a burst animate
+// smoothly, at the cost of the screen trailing further behind the host; lower
+// keeps the terminal closer to live but gives the scroll less to work with, so
+// bursty output starves the slide (an "underrun"). The renderer caps it at the
+// scroll headroom (MAXPEND in textmode.c).
+// Scroll-speed range the Setup menu can dial through (px/s). Setup steps in
+// 10/25/50 px increments depending on the band.
+#define SCROLL_SPEED_MIN  20
+#define SCROLL_SPEED_MAX 1500
+
+#define SCROLL_DEPTH_DEFAULT 2
+#define SCROLL_DEPTH_MIN     1
+#define SCROLL_DEPTH_MAX     8
+
+// Overrun limit: buffered lines past which a constant-speed scroll can no longer
+// catch up, so the whole ring is dumped to the screen at once and the animation
+// resets -- the way a real terminal overruns -- rather than lagging seconds
+// behind the host. Raise it to ride out longer bursts smoothly at the cost of
+// more lag; lower it to stay closer to live and jump more often.
+#define SCROLL_DUMP_DEFAULT  80
+#define SCROLL_DUMP_MIN      10
+#define SCROLL_DUMP_MAX     400
+
 // ---- Network host link ------------------------------------------------------
 // Optional network destination connected on boot instead of the serial link
 // (ssh_host takes precedence over telnet_host; empty both = serial).

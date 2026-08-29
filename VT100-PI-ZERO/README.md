@@ -66,6 +66,8 @@ cursor     = block       # block | underline
 local_echo = off         # on | off
 smooth_scroll = on       # on | off  (slide text up instead of jumping)
 scroll_speed  = 600      # pixels/second (a line is ~32px; bursts catch up)
+scroll_depth  = 2        # lines of slide in flight (pacing depth)
+scroll_dump   = 80       # backlog in lines past which the screen dump-resets
 fg_color   = #FFFFFF     # custom-theme foreground (used when theme = custom)
 bg_color   = #000000     # custom-theme background
 font       =             # empty = DejaVu (default), a bundled name, or an absolute .ttf path
@@ -110,7 +112,43 @@ Smooth scroll slides the screen up a few pixels per frame instead of jumping a
 whole line. A single new line glides in over a few frames; when lines pile up it
 slides faster to catch up (up to a row per frame), and a burst more than ~8 lines
 behind falls back to an instant jump. `scroll_speed` sets the base rate; higher
-is snappier, lower is more languid.
+is snappier, lower is more languid. Setup steps it in 10 px/s increments below
+200, 25 up to 600 and 50 above, so it can be trimmed to taste rather than picked
+from a handful of presets.
+
+### Tuning the pacing
+
+Two knobs control the buffer between the host and the glass, and they pull in
+opposite directions:
+
+- **`scroll_depth`** (1-8, default 2) - how many lines of slide may be in flight
+  at once. Higher lets more of a burst animate smoothly, at the cost of the
+  screen trailing further behind the host; lower keeps the terminal closer to
+  live but gives the animation less to work with, so bursty output starves it.
+- **`scroll_dump`** (10-400, default 80) - the backlog past which a constant-speed
+  scroll can no longer catch up, so the whole buffer is dumped to the screen at
+  once and the animation resets, the way a real terminal overruns. Raise it to
+  ride out longer bursts smoothly at the cost of more lag; lower it to stay
+  closer to live and jump more often.
+
+Setup's header shows which way the pipeline is actually leaning, live:
+
+```
+Buffer: keeping up  0/80 peak 12  0 over / 3 under
+```
+
+- **falling behind** - output is arriving faster than the scroll displays it and
+  the buffer is filling. Raise `scroll_speed`, or `scroll_dump` to absorb longer
+  bursts before the screen gives up and jumps.
+- **starved** - the buffer keeps running dry mid-slide, so the animation finishes
+  with nothing behind it. Raise `scroll_depth` so more is queued before a slide
+  starts, or lower `scroll_speed`.
+- **keeping up** / **idle** - nothing to fix.
+
+The counters are `over` (times the screen dump-reset) and `under` (times a slide
+ran dry). **R** resets them, so a change can be judged on its own rather than
+against the whole session. They stop updating while Setup is open, since the
+buffer isn't being drained then.
 
 Themes: `color` is the full 16-colour ANSI palette; `amber`/`green`/`white`/
 `blue`/`red`/`yellow` are monochrome phosphor looks; `c64`, `vic20`, `c128`, and

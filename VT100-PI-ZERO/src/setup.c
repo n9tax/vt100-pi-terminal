@@ -10,6 +10,7 @@
 #include "video/themes.h"
 #include "io/serial_linux.h"
 #include "net/hostconn.h"
+#include "flow.h"
 #include "service.h"
 
 #include <string.h>
@@ -20,8 +21,16 @@
 #include <arpa/inet.h>
 
 enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
-       F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_FONT, F_BOOT,
-       NFIELDS };
+       F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_DEPTH, F_DUMP,
+       F_FONT, F_BOOT, NFIELDS };
+
+// Layout. With 19 fields the menu fills the grid, so the rows are laid out
+// explicitly rather than left to drift: title, a live status line, a blank,
+// the fields, then two help lines at the bottom.
+#define ROW_TITLE  0
+#define ROW_STATUS 1
+#define ROW_BUFFER 2
+#define ROW_FIELD0 3
 
 static int is_text_field(int i) {
     return i == F_SERIAL || i == F_FG || i == F_BG || i == F_SSH || i == F_TELNET;
@@ -30,6 +39,11 @@ static int is_text_field(int i) {
 // Action rows do something when Enter lands on them, instead of the usual
 // save-and-close. Currently just the manual reconnect.
 static int is_action_field(int i) { return i == F_LINK; }
+
+// Scroll-speed increment at a given speed. 10 px/s is a meaningful trim at 150
+// and imperceptible at 900, so the step widens with the value -- a constant fine
+// step would make crossing the range take forever.
+static int speed_step(int v) { return v < 200 ? 10 : (v < 600 ? 25 : 50); }
 
 static int active;
 static int sel;
@@ -81,6 +95,9 @@ static void field_value(int i, char *out, size_t n) {
         case F_TPORT:  snprintf(out, n, "%d", work.telnet_port); break;
         case F_AUTOREC: snprintf(out, n, "%s", work.auto_reconnect ? "on" : "off"); break;
         case F_LINK:   snprintf(out, n, "%s", hostconn_status()); break;
+        case F_DEPTH:  snprintf(out, n, "%d line%s in flight",
+                                work.scroll_depth, work.scroll_depth == 1 ? "" : "s"); break;
+        case F_DUMP:   snprintf(out, n, "%d lines", work.scroll_dump); break;
         case F_THEME:  snprintf(out, n, "%s", settings_theme_name(work.theme)); break;
         case F_FG:     snprintf(out, n, "%s", work.fg_hex); break;
         case F_BG:     snprintf(out, n, "%s", work.bg_hex); break;
@@ -103,19 +120,24 @@ static void draw(void) {
         "Local shell", "Serial device", "Baud rate", "SSH host", "Telnet host",
         "Telnet port", "Auto reconnect", "Host link", "Theme", "Custom FG",
         "Custom BG", "Cursor", "Local echo", "Smooth scroll", "Scroll speed",
-        "Font", "Start at boot",
+        "Scroll depth", "Overrun limit", "Font", "Start at boot",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
             tm_cells[r][c] = (cell_t){ ' ', 7, 0, 0 };
 
-    char hdr[128];
+    // The address and the buffer verdict get a row each: together they run past
+    // 80 columns with a long IP and a full status, and put() would silently
+    // truncate exactly the over/under counts the line exists to show.
+    char hdr[160];
     snprintf(hdr, sizeof hdr, "This Pi: %s   (ssh in here)", ip_str);
-    put(1, 4, "VT100-PI-ZERO  \xC4\xC4  SETUP", 7, 0, ATTR_BOLD);
-    put(2, 4, hdr, 7, 0, 0);
+    put(ROW_TITLE, 4, "VT100-PI-ZERO  \xC4\xC4  SETUP", 7, 0, ATTR_BOLD);
+    put(ROW_STATUS, 4, hdr, 7, 0, 0);
+    snprintf(hdr, sizeof hdr, "Buffer: %s", flow_status());
+    put(ROW_BUFFER, 4, hdr, 7, 0, 0);
 
     for (int i = 0; i < NFIELDS; ++i) {
-        int r = 4 + i;
+        int r = ROW_FIELD0 + i;
         int selrow = (i == sel);
         char val[300];
         field_value(i, val, sizeof val);
@@ -128,13 +150,14 @@ static void draw(void) {
         put(r, 22, val, selrow ? 0 : 7, selrow ? 7 : 0, 0);   // selected = reverse video
     }
 
-    // Two help lines only: with the reconnect rows added the field list runs to
-    // the third-from-last row.
     if (is_action_field(sel))
-        put(TERM_ROWS - 2, 4, "Enter: reconnect now            Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
+        put(TERM_ROWS - 1, 4, "Enter: reconnect now            Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
     else
-        put(TERM_ROWS - 2, 4, "Enter: save & apply/connect     Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
-    put(TERM_ROWS - 3, 4, "Up/Down: field   Left/Right: change   hosts are typed", 7, 0, 0);
+        put(TERM_ROWS - 1, 4, "Enter: save & apply/connect     Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
+    if (sel == F_SPEED || sel == F_DEPTH || sel == F_DUMP)
+        put(TERM_ROWS - 2, 4, "over = raise speed/limit;  under = raise depth;  R: reset counters", 7, 0, 0);
+    else
+        put(TERM_ROWS - 2, 4, "Up/Down: field   Left/Right: change   hosts are typed", 7, 0, 0);
 
     textmode_render_all();
 }
@@ -170,15 +193,31 @@ static void change(int d) {
         case F_ECHO:   work.local_echo ^= 1; break;
         case F_SMOOTH: work.smooth_scroll ^= 1; break;
         case F_SPEED: {
-            static const int sp[] = { 60, 100, 150, 200, 225, 250, 275, 300, 450, 600, 900, 1200 };
-            int ns = (int)(sizeof sp / sizeof sp[0]);
-            int idx = 0, best = 1 << 30;
-            for (int i = 0; i < ns; ++i) {
-                int dd = sp[i] - work.scroll_speed; if (dd < 0) dd = -dd;
-                if (dd < best) { best = dd; idx = i; }
-            }
-            idx = (idx + d + ns) % ns;
-            work.scroll_speed = sp[idx];
+            // Arithmetic stepping rather than a fixed table, so the speed can be
+            // trimmed to taste. The step widens with the value: 10 px/s matters
+            // at 150 and is imperceptible at 900, and a constant fine step would
+            // make crossing the range take forever.
+            // Stepping down uses the band the value is leaving, so a step down
+            // followed by a step up returns to where it started.
+            int v = work.scroll_speed;
+            v += d * (d > 0 ? speed_step(v) : speed_step(v - 1));
+            if (v < SCROLL_SPEED_MIN) v = SCROLL_SPEED_MIN;
+            if (v > SCROLL_SPEED_MAX) v = SCROLL_SPEED_MAX;
+            work.scroll_speed = v;
+            break;
+        }
+        case F_DEPTH: {
+            int v = work.scroll_depth + d;
+            if (v < SCROLL_DEPTH_MIN) v = SCROLL_DEPTH_MIN;
+            if (v > SCROLL_DEPTH_MAX) v = SCROLL_DEPTH_MAX;
+            work.scroll_depth = v;
+            break;
+        }
+        case F_DUMP: {
+            int v = work.scroll_dump + d * 10;
+            if (v < SCROLL_DUMP_MIN) v = SCROLL_DUMP_MIN;
+            if (v > SCROLL_DUMP_MAX) v = SCROLL_DUMP_MAX;
+            work.scroll_dump = v;
             break;
         }
         case F_FONT: {
@@ -233,6 +272,7 @@ static void do_save(int force_reconnect) {
     textmode_set_theme(work.theme);
     textmode_set_cursor_style(work.cursor_style);
     textmode_set_smooth(work.smooth_scroll, work.scroll_speed);
+    textmode_set_scroll_depth(work.scroll_depth);
     if (strcmp(work.serial_dev, orig.serial_dev) != 0 || work.baud != orig.baud)
         serial_reconfigure(work.serial_dev, work.baud);
     if (strcmp(work.font_path, orig.font_path) != 0)
@@ -309,6 +349,11 @@ void setup_feed(uint8_t b) {
     if (b == 0x1b) { esc = 1; return; }
     if (b == '\r' || b == '\n') { do_save(is_action_field(sel)); return; }
     if (b == '\t') { move_sel(+1); draw(); return; }
+    if ((b == 'r' || b == 'R') && !is_text_field(sel)) {   // reset the flow counters
+        flow_reset();
+        draw();
+        return;
+    }
 
     if (is_text_field(sel)) edit_text(b);
     draw();

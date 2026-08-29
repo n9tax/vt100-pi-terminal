@@ -16,6 +16,7 @@ pkg_check_modules(FREETYPE REQUIRED freetype2)
 add_executable(vt100-pi-zero
         src/main.c
         src/settings.c
+        src/flow.c
         src/setup.c
         src/service.c
         src/terminal/vtparse.c

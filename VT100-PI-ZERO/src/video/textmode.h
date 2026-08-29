@@ -67,6 +67,10 @@ void textmode_scroll_tick(void);             // advance the slide one frame (mai
 int  textmode_scroll_busy(void);             // 1 while a slide is in flight
 void textmode_scroll_snap(void);             // finish any slide immediately
 void textmode_set_scroll_pace(int backlog);  // (pacing is derived internally)
+
+// How many lines of slide may be in flight at once (settings' scroll_depth).
+// Clamped to the renderer's scroll headroom.
+void textmode_set_scroll_depth(int lines);
 void textmode_set_backlog(int lines);        // lines buffered in the serial ring
 int  textmode_feed_room(void);               // ok to feed another line into the slide
 
