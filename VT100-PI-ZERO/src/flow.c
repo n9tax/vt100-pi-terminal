@@ -9,6 +9,7 @@ static int peak_backlog;
 static int overruns;
 static int underruns;
 static int backlog_now;
+static int paused;         // Setup has the screen: the ring is not being drained
 
 // Verdict hysteresis. A single sample is meaningless -- the ring is empty
 // between every keystroke -- so the live verdict is based on how the last
@@ -24,8 +25,18 @@ static char line[128];
 
 // An underrun only counts while a slide is actually in flight: an empty ring
 // with no slide is just an idle terminal, not a starved animation.
+// The ring keeps filling while Setup owns the screen, because nothing is
+// draining it. Show that live -- it is real, and it is what the buffer is
+// actually doing -- but keep it out of the peak, the counters and the verdict,
+// which describe the terminal running, not the menu being open.
+void flow_sample_paused(int backlog) {
+    backlog_now = backlog;
+    paused = 1;
+}
+
 void flow_sample(int backlog, int scroll_busy, int fed) {
     backlog_now = backlog;
+    paused = 0;
     if (backlog > peak_backlog) peak_backlog = backlog;
 
     if (win_n >= SAMPLE_WIN) {                 // roll the window
@@ -64,7 +75,8 @@ const char *flow_status(void) {
                   : verdict == V_STARVED ? "starved"
                   : verdict == V_OK      ? "keeping up"
                                          : "idle";
-    snprintf(line, sizeof line, "%s  %d/%d peak %d  %d over / %d under",
-             v, backlog_now, g_settings.scroll_dump, peak_backlog, overruns, underruns);
+    snprintf(line, sizeof line, "%s  %d/%d peak %d  %d over / %d under%s",
+             v, backlog_now, g_settings.scroll_dump, peak_backlog, overruns, underruns,
+             paused ? "  [feed paused]" : "");
     return line;
 }

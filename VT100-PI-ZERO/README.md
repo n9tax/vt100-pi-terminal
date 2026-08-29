@@ -68,6 +68,7 @@ smooth_scroll = on       # on | off  (slide text up instead of jumping)
 scroll_speed  = 600      # pixels/second (a line is ~32px; bursts catch up)
 scroll_depth  = 2        # lines of slide in flight (pacing depth)
 scroll_dump   = 80       # backlog in lines past which the screen dump-resets
+auto_speed    = off      # closed loop: trim the speed to match the host's rate
 fg_color   = #FFFFFF     # custom-theme foreground (used when theme = custom)
 bg_color   = #000000     # custom-theme background
 font       =             # empty = DejaVu (default), a bundled name, or an absolute .ttf path
@@ -112,9 +113,9 @@ Smooth scroll slides the screen up a few pixels per frame instead of jumping a
 whole line. A single new line glides in over a few frames; when lines pile up it
 slides faster to catch up (up to a row per frame), and a burst more than ~8 lines
 behind falls back to an instant jump. `scroll_speed` sets the base rate; higher
-is snappier, lower is more languid. Setup steps it in 10 px/s increments below
-200, 25 up to 600 and 50 above, so it can be trimmed to taste rather than picked
-from a handful of presets.
+is snappier, lower is more languid. Setup steps it in 5 px/s increments over
+20-1500, so it can be trimmed precisely; the keyboard's auto-repeat is passed
+through to the menu, so hold the arrow to cross the range and tap it to nudge.
 
 ### Tuning the pacing
 
@@ -147,8 +148,38 @@ Buffer: keeping up  0/80 peak 12  0 over / 3 under
 
 The counters are `over` (times the screen dump-reset) and `under` (times a slide
 ran dry). **R** resets them, so a change can be judged on its own rather than
-against the whole session. They stop updating while Setup is open, since the
-buffer isn't being drained then.
+against the whole session.
+
+The reading is live while the menu is open: the buffer genuinely keeps filling
+behind it, since nothing is draining it, and the line is marked `[feed paused]`
+so a rising number is read for what it is. The verdict and the counters hold
+still while paused — they describe the terminal running, not the menu being open.
+
+### Auto speed (closed loop)
+
+`auto_speed = on` puts a PID controller on the scroll speed, holding the backlog
+at a small setpoint. Holding a constant backlog means consuming lines exactly as
+fast as the host produces them, so in effect it rate-matches the scroll to the
+host: a burst speeds it up, quiet output eases it down, and the buffer neither
+runs away nor runs dry. `scroll_speed` stops being a fixed rate and becomes the
+starting point and the resting speed; the Scroll speed row shows both
+(`300 px/s  (auto: 465)`).
+
+It is deliberately sluggish — it recomputes 4x a second and ramps at most
+25 px/s per step, because a speed that visibly surges is worse than one that is
+merely wrong. It can rise to the maximum but will only fall to half the
+configured speed: rate-matching a slow host all the way down would make each
+line crawl, which is fine for watching a log and awful at a shell prompt. After
+two seconds of silence it unwinds back to the configured speed, so every burst
+starts from a known rate.
+
+The D term is present but its gain is **0**. The backlog is a small, quantised,
+bursty integer, and differentiating it turns sampling noise into visible speed
+wobble — worse than the error it would correct. P and I do the work; I is what
+actually matches the rates.
+
+Off by default: it is a different feel, not a fix, and a fixed speed is the
+calmer choice for reading.
 
 Themes: `color` is the full 16-colour ANSI palette; `amber`/`green`/`white`/
 `blue`/`red`/`yellow` are monochrome phosphor looks; `c64`, `vic20`, `c128`, and

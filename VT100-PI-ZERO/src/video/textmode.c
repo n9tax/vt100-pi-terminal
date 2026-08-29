@@ -345,6 +345,12 @@ void textmode_set_flash(int on) {
 
 int textmode_smooth_enabled(void) { return smooth_on; }
 
+// Speed alone, leaving the on/off state untouched -- the auto-speed controller
+// retunes this several times a second and must not care about smooth_on.
+void textmode_set_scroll_speed(int pps) {
+    if (pps > 0) { base_step = pps * 256 / 60; if (base_step < 1) base_step = 1; }
+}
+
 void textmode_set_smooth(int on, int pps) {
     smooth_on = on ? 1 : 0;
     if (pps > 0) { base_step = pps * 256 / 60; if (base_step < 1) base_step = 1; }  // px/frame * 256

@@ -28,6 +28,12 @@
 //   fed         1 if this iteration fed any bytes into the terminal
 void flow_sample(int backlog, int scroll_busy, int fed);
 
+// Sample while Setup owns the screen. Updates only the live backlog (the ring
+// really is filling, since nothing is draining it) and marks the status line
+// "[feed paused]" -- the peak, counters and verdict are left alone so the menu
+// being open does not register as an overrun.
+void flow_sample_paused(int backlog);
+
 // The ring exceeded the dump threshold and was flushed to the screen at once.
 void flow_note_overrun(void);
 

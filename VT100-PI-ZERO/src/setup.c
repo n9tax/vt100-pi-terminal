@@ -11,22 +11,24 @@
 #include "io/serial_linux.h"
 #include "net/hostconn.h"
 #include "flow.h"
+#include "autospeed.h"
 #include "service.h"
 
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
-       F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_DEPTH, F_DUMP,
-       F_FONT, F_BOOT, NFIELDS };
+       F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_AUTOSPD,
+       F_DEPTH, F_DUMP, F_FONT, F_BOOT, NFIELDS };
 
-// Layout. With 19 fields the menu fills the grid, so the rows are laid out
-// explicitly rather than left to drift: title, a live status line, a blank,
-// the fields, then two help lines at the bottom.
+// Layout. The field list now fills the grid exactly -- title, address, buffer
+// line, then NFIELDS rows, then a single help line on the last row. There is no
+// room left: another setting needs the menu paginated, not another row.
 #define ROW_TITLE  0
 #define ROW_STATUS 1
 #define ROW_BUFFER 2
@@ -40,10 +42,6 @@ static int is_text_field(int i) {
 // save-and-close. Currently just the manual reconnect.
 static int is_action_field(int i) { return i == F_LINK; }
 
-// Scroll-speed increment at a given speed. 10 px/s is a meaningful trim at 150
-// and imperceptible at 900, so the step widens with the value -- a constant fine
-// step would make crossing the range take forever.
-static int speed_step(int v) { return v < 200 ? 10 : (v < 600 ? 25 : 50); }
 
 static int active;
 static int sel;
@@ -61,6 +59,12 @@ static const int  tports[] = { 23, 992, 2323 };
 #define NTPORTS ((int)(sizeof tports / sizeof tports[0]))
 
 int setup_active(void) { return active; }
+
+static long long now_ms_setup(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 // This Pi's first non-loopback IPv4 address, for ssh-ing into it.
 static void find_ip(char *out, size_t n) {
@@ -104,7 +108,15 @@ static void field_value(int i, char *out, size_t n) {
         case F_CURSOR: snprintf(out, n, "%s", work.cursor_style ? "underline" : "block"); break;
         case F_ECHO:   snprintf(out, n, "%s", work.local_echo ? "on" : "off"); break;
         case F_SMOOTH: snprintf(out, n, "%s", work.smooth_scroll ? "on" : "off"); break;
-        case F_SPEED:  snprintf(out, n, "%d px/s", work.scroll_speed); break;
+        case F_SPEED:
+            // Under auto speed the configured value is only the starting point,
+            // so show what the controller has actually settled on.
+            if (work.auto_speed && autospeed_enabled())
+                snprintf(out, n, "%d px/s  (auto: %d)", work.scroll_speed, autospeed_pps());
+            else
+                snprintf(out, n, "%d px/s", work.scroll_speed);
+            break;
+        case F_AUTOSPD: snprintf(out, n, "%s", work.auto_speed ? "on" : "off"); break;
         case F_FONT: {
             int idx = fonts_index_of(work.font_path);
             if (idx >= 0) snprintf(out, n, "%s", fonts_name(idx));
@@ -120,7 +132,7 @@ static void draw(void) {
         "Local shell", "Serial device", "Baud rate", "SSH host", "Telnet host",
         "Telnet port", "Auto reconnect", "Host link", "Theme", "Custom FG",
         "Custom BG", "Cursor", "Local echo", "Smooth scroll", "Scroll speed",
-        "Scroll depth", "Overrun limit", "Font", "Start at boot",
+        "Auto speed", "Scroll depth", "Overrun limit", "Font", "Start at boot",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
@@ -150,14 +162,14 @@ static void draw(void) {
         put(r, 22, val, selrow ? 0 : 7, selrow ? 7 : 0, 0);   // selected = reverse video
     }
 
+    const char *help;
     if (is_action_field(sel))
-        put(TERM_ROWS - 1, 4, "Enter: reconnect now            Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
+        help = "Enter: reconnect now                          Ctrl+F3: cancel";
+    else if (sel == F_SPEED || sel == F_DEPTH || sel == F_DUMP || sel == F_AUTOSPD)
+        help = "over: raise speed/limit  under: raise depth  R: reset  Enter: save";
     else
-        put(TERM_ROWS - 1, 4, "Enter: save & apply/connect     Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
-    if (sel == F_SPEED || sel == F_DEPTH || sel == F_DUMP)
-        put(TERM_ROWS - 2, 4, "over = raise speed/limit;  under = raise depth;  R: reset counters", 7, 0, 0);
-    else
-        put(TERM_ROWS - 2, 4, "Up/Down: field   Left/Right: change   hosts are typed", 7, 0, 0);
+        help = "Up/Down: field   Left/Right: change   Enter: save   Ctrl+F3: cancel";
+    put(TERM_ROWS - 1, 4, help, 7, 0, ATTR_BOLD);
 
     textmode_render_all();
 }
@@ -186,6 +198,7 @@ static void change(int d) {
         }
         case F_SHELL:  work.local_shell ^= 1; break;
         case F_AUTOREC: work.auto_reconnect ^= 1; break;
+        case F_AUTOSPD: work.auto_speed ^= 1; break;
         case F_LINK:   break;   // an action row: Enter drives it, not Left/Right
         case F_BOOT:   boot_flag ^= 1; break;
         case F_THEME:  { int nt = themes_count(); work.theme = (work.theme + d + nt) % nt; break; }
@@ -199,8 +212,7 @@ static void change(int d) {
             // make crossing the range take forever.
             // Stepping down uses the band the value is leaving, so a step down
             // followed by a step up returns to where it started.
-            int v = work.scroll_speed;
-            v += d * (d > 0 ? speed_step(v) : speed_step(v - 1));
+            int v = work.scroll_speed + d * SCROLL_SPEED_STEP;
             if (v < SCROLL_SPEED_MIN) v = SCROLL_SPEED_MIN;
             if (v > SCROLL_SPEED_MAX) v = SCROLL_SPEED_MAX;
             work.scroll_speed = v;
@@ -273,6 +285,7 @@ static void do_save(int force_reconnect) {
     textmode_set_cursor_style(work.cursor_style);
     textmode_set_smooth(work.smooth_scroll, work.scroll_speed);
     textmode_set_scroll_depth(work.scroll_depth);
+    autospeed_set(work.auto_speed, work.scroll_speed, now_ms_setup());
     if (strcmp(work.serial_dev, orig.serial_dev) != 0 || work.baud != orig.baud)
         serial_reconfigure(work.serial_dev, work.baud);
     if (strcmp(work.font_path, orig.font_path) != 0)

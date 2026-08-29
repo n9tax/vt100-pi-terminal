@@ -53,6 +53,8 @@ static const char *DEFAULT_FILE =
     "                        # more lag behind the host; lower = closer to live\n"
     "scroll_dump   = 80      # backlog (lines) past which the screen dumps and\n"
     "                        # resets instead of lagging further behind\n"
+    "auto_speed    = off     # closed-loop: trim the speed to match the host's\n"
+    "                        # output rate (scroll_speed becomes the starting point)\n"
     "\n"
     "# Custom-theme colours (used when theme = custom), #RRGGBB:\n"
     "fg_color   = " CUSTOM_FG_DEFAULT "\n"
@@ -104,6 +106,7 @@ static void set_defaults(void) {
     g_settings.scroll_speed = SCROLL_SPEED_DEFAULT;
     g_settings.scroll_depth = SCROLL_DEPTH_DEFAULT;
     g_settings.scroll_dump = SCROLL_DUMP_DEFAULT;
+    g_settings.auto_speed = AUTO_SPEED_DEFAULT;
     snprintf(g_settings.telnet_host, sizeof g_settings.telnet_host, "%s", TELNET_HOST_DEFAULT);
     g_settings.telnet_port = TELNET_PORT_DEFAULT;
     snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", SSH_HOST_DEFAULT);
@@ -158,6 +161,7 @@ static void apply(const char *key, const char *val) {
     else if (!strcasecmp(key, "scroll_speed"))  g_settings.scroll_speed = atoi(val);
     else if (!strcasecmp(key, "scroll_depth"))  g_settings.scroll_depth = clampi(atoi(val), SCROLL_DEPTH_MIN, SCROLL_DEPTH_MAX);
     else if (!strcasecmp(key, "scroll_dump"))   g_settings.scroll_dump = clampi(atoi(val), SCROLL_DUMP_MIN, SCROLL_DUMP_MAX);
+    else if (!strcasecmp(key, "auto_speed"))    g_settings.auto_speed = parse_bool(val, g_settings.auto_speed);
     else if (!strcasecmp(key, "telnet_host"))   snprintf(g_settings.telnet_host, sizeof g_settings.telnet_host, "%s", val);
     else if (!strcasecmp(key, "telnet_port"))   g_settings.telnet_port = atoi(val);
     else if (!strcasecmp(key, "ssh_host"))      snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", val);
@@ -255,6 +259,7 @@ void settings_save(void) {
         "                        # bursts, more lag; lower = closer to live\n"
         "scroll_dump   = %d      # backlog (lines) past which the screen dumps\n"
         "                        # and resets instead of lagging further behind\n"
+        "auto_speed    = %s     # closed-loop: trim the speed to match the host\n"
         "\n"
         "# Custom-theme colours (used when theme = custom), #RRGGBB:\n"
         "fg_color   = %s\n"
@@ -274,6 +279,7 @@ void settings_save(void) {
         g_settings.local_echo ? "on" : "off",
         g_settings.smooth_scroll ? "on" : "off", g_settings.scroll_speed,
         g_settings.scroll_depth, g_settings.scroll_dump,
+        g_settings.auto_speed ? "on" : "off",
         g_settings.fg_hex, g_settings.bg_hex, g_settings.font_path);
     fclose(f);
     fprintf(stderr, "settings: saved %s\n", cfg_path);

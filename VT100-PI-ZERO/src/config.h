@@ -55,10 +55,52 @@
 // keeps the terminal closer to live but gives the scroll less to work with, so
 // bursty output starves the slide (an "underrun"). The renderer caps it at the
 // scroll headroom (MAXPEND in textmode.c).
-// Scroll-speed range the Setup menu can dial through (px/s). Setup steps in
-// 10/25/50 px increments depending on the band.
-#define SCROLL_SPEED_MIN  20
+// Scroll-speed range and step the Setup menu dials through (px/s). A flat fine
+// step: the keyboard's auto-repeat is passed through to the menu, so holding the
+// arrow crosses the range while a tap trims by one increment.
+#define SCROLL_SPEED_MIN   20
 #define SCROLL_SPEED_MAX 1500
+#define SCROLL_SPEED_STEP   5
+
+// ---- Auto speed (closed-loop pacing) ---------------------------------------
+// A PID controller that trims the scroll speed to hold the backlog at a small
+// setpoint -- in effect matching the scroll rate to the host's output rate, so
+// a burst speeds up and quiet output slows down without the screen ever running
+// away or starving. Off by default: it is a different feel, not a fix.
+#define AUTO_SPEED_DEFAULT 0
+
+// Setpoint, in buffered lines. Small: this is how far behind the host the screen
+// deliberately sits in order to keep the slide fed.
+#define AUTO_SPEED_TARGET_LINES 4
+
+// Gains. Error is in lines, output in px/s.
+//   P  immediate response to the current error
+//   I  removes the standing offset, which is what actually matches the rates
+//   D  deliberately 0 -- the backlog is a small, quantised, bursty integer, and
+//      differentiating it amplifies sampling noise into a visible speed wobble,
+//      which on a scroll is worse than the error it would correct. The term is
+//      implemented so it can be tried; it is not on.
+#define AUTO_SPEED_KP  24
+#define AUTO_SPEED_KI   6
+#define AUTO_SPEED_KD   0
+
+// Control period and slew limit. Speed changes must be gradual or the scroll
+// visibly surges; this caps the ramp at AUTO_SPEED_SLEW px/s per update.
+#define AUTO_SPEED_PERIOD_MS 250
+#define AUTO_SPEED_SLEW       25
+
+// Integral windup clamp (in line-seconds), and how long output must be quiet
+// before the controller eases back to the configured base speed.
+#define AUTO_SPEED_I_CLAMP  40
+#define AUTO_SPEED_IDLE_MS 2000
+
+// How far below the configured speed the controller may go, as a divisor of it.
+// Rate-matching a slow host all the way down would drive the speed to the
+// minimum and make every line crawl -- fine for watching a log, awful at a shell
+// prompt, where a line should appear promptly however slowly you type. So the
+// controller may ease off for gentle output, but only to base/N; it is free to
+// go all the way up, because falling behind is the failure that actually shows.
+#define AUTO_SPEED_FLOOR_DIV 2
 
 #define SCROLL_DEPTH_DEFAULT 2
 #define SCROLL_DEPTH_MIN     1

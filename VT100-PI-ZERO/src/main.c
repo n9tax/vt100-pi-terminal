@@ -21,6 +21,7 @@
 #include "settings.h"
 #include "setup.h"
 #include "flow.h"
+#include "autospeed.h"
 #include "video/textmode.h"
 #include "io/serial_linux.h"
 #include "io/kbd_evdev.h"
@@ -142,6 +143,7 @@ int main(void) {
     textmode_set_cursor_style(g_settings.cursor_style);
     textmode_set_smooth(g_settings.smooth_scroll, g_settings.scroll_speed);
     textmode_set_scroll_depth(g_settings.scroll_depth);
+    autospeed_set(g_settings.auto_speed, g_settings.scroll_speed, now_ms());
     serial_init(g_settings.serial_dev, g_settings.baud);
     kbd_init();
     screen_init();
@@ -231,8 +233,12 @@ int main(void) {
             // Setup owns the screen: route keys to the menu, pause the host link.
             int k;
             while ((k = kbd_getc()) >= 0) setup_feed((uint8_t)k);
-            // Repaint a few times a second so the Host link row's countdown and
-            // an auto-reconnect landing mid-menu are visible as they happen.
+            // The ring keeps filling behind the menu; show that live rather than
+            // freezing the reading from whenever Setup was opened.
+            flow_sample_paused(inbuf_pending_lines());
+            // Repaint a few times a second so the Host link row's countdown, the
+            // buffer line and an auto-reconnect landing mid-menu are all visible
+            // as they happen.
             if (now_ms() - last_setup_paint > 250) {
                 setup_refresh();
                 last_setup_paint = now_ms();
@@ -274,6 +280,7 @@ int main(void) {
             // screen the ring is not drained, so sampling there would read as a
             // growing overrun that is really just the menu being open.
             flow_sample(inbuf_pending_lines(), textmode_scroll_busy(), fed);
+            autospeed_update(inbuf_pending_lines(), fed, now_ms());
 
             // Keyboard -> host, + optional local echo.
             uint8_t kb[64]; int kn = 0, k;
