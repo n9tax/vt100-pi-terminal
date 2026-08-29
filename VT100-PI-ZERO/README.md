@@ -218,8 +218,8 @@ saving (see "When the session drops" above).
 ## Boot straight into the terminal (kiosk mode)
 
 ```
-./install.sh --deps --kiosk     # first time on a fresh Pi
-./install.sh                    # every time after that (git pull && ./install.sh)
+./install.sh --deps     # first time on a fresh Pi
+./install.sh            # every time after that (git pull && ./install.sh)
 ```
 
 `install.sh` builds, installs the binary/fonts/unit, enables the service and
@@ -233,10 +233,21 @@ steps that need root, and building as root would leave root-owned files in the
 source tree that break the next ordinary build or `git pull`. It refuses to run
 as root for that reason.
 
+**Kiosk is the default.** `getty@tty1` is masked, so nothing else draws on the
+screen and the Pi boots straight into the terminal — that is the whole point of
+the machine. It is masked rather than disabled because logind spawns an autovt
+getty on demand, and a merely disabled one comes back and takes the VT, leaving
+the monitor on a login prompt. ssh is unaffected; this only removes the console
+on the attached screen. Undo with:
+
+```
+sudo systemctl unmask --now getty@tty1.service
+```
+
 | flag | effect |
 |---|---|
 | `--deps` | `apt-get` the build dependencies first |
-| `--kiosk` | also mask `getty@tty1` so the text console can't fight for tty1 |
+| `--no-kiosk` | leave the tty1 login console in place (it will fight for the display) |
 | `--no-enable` | install and start, but don't start at boot |
 | `--clean` | wipe the build directory first |
 | `--build-only` | build and install nothing (no root needed) |
@@ -251,7 +262,7 @@ sudo mkdir -p /usr/local/share/vt100-pi/fonts
 sudo cp assets/*.ttf /usr/local/share/vt100-pi/fonts/   # so bundled fonts resolve off-tree
 sudo cp systemd/vt100-pi.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl mask getty@tty1.service
+sudo systemctl mask --now getty@tty1.service
 sudo systemctl enable --now vt100-pi.service
 ```
 </details>

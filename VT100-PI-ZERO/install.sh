@@ -6,10 +6,14 @@
 #
 #   ./install.sh              build, install, enable at boot, start
 #   ./install.sh --deps       apt-get the build dependencies first
-#   ./install.sh --kiosk      also mask getty@tty1 (console kiosk)
+#   ./install.sh --no-kiosk   leave the tty1 login console in place
 #   ./install.sh --no-enable  install and start, but don't start at boot
 #   ./install.sh --clean      wipe the build directory first
 #   ./install.sh --build-only build, install nothing (no root needed)
+#
+# Kiosk is the default: this is a hardware terminal, so getty@tty1 is masked and
+# the machine boots straight into it with no login console on the screen. Undo
+# with:  sudo systemctl unmask --now getty@tty1.service
 #
 # The build runs before the service is stopped, so a failed build leaves the
 # running terminal untouched.
@@ -24,7 +28,7 @@ BIN_DST=/usr/local/bin/vt100-pi-zero
 FONT_DST=/usr/local/share/vt100-pi/fonts
 UNIT_DST=/etc/systemd/system/$SERVICE
 
-DO_DEPS=0 DO_KIOSK=0 DO_ENABLE=1 DO_CLEAN=0 BUILD_ONLY=0 ALLOW_ROOT=0
+DO_DEPS=0 DO_KIOSK=1 DO_ENABLE=1 DO_CLEAN=0 BUILD_ONLY=0 ALLOW_ROOT=0
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
@@ -40,7 +44,8 @@ usage() {
 while [ $# -gt 0 ]; do
     case "$1" in
         --deps)       DO_DEPS=1 ;;
-        --kiosk)      DO_KIOSK=1 ;;
+        --kiosk)      DO_KIOSK=1 ;;        # now the default; kept so it still works
+        --no-kiosk)   DO_KIOSK=0 ;;
         --no-enable)  DO_ENABLE=0 ;;
         --clean)      DO_CLEAN=1 ;;
         --build-only) BUILD_ONLY=1 ;;
@@ -141,20 +146,27 @@ $SUDO systemctl daemon-reload
 # ---- kiosk ----------------------------------------------------------------
 # Masked, not just disabled: logind can spawn an autovt getty on demand, which
 # would fight the terminal for tty1.
+# Masked rather than merely disabled: logind spawns an autovt getty on demand,
+# so a disabled one comes back and takes the VT.
 if [ "$DO_KIOSK" -eq 1 ]; then
-    say "Kiosk mode: masking getty@tty1"
-    $SUDO systemctl disable --now getty@tty1.service 2>/dev/null || true
-    $SUDO systemctl mask getty@tty1.service
-    info "text console on tty1 is now off (unmask to undo)"
+    if systemctl is-enabled getty@tty1.service 2>/dev/null | grep -q masked; then
+        say "Kiosk: getty@tty1 already masked"
+    else
+        say "Kiosk: masking getty@tty1 so the console cannot take the display"
+        $SUDO systemctl disable --now getty@tty1.service 2>/dev/null || true
+        $SUDO systemctl mask getty@tty1.service
+        info "no login console on tty1 from now on"
+        info "undo with: sudo systemctl unmask --now getty@tty1.service"
+        info "(ssh still works; this only affects the console on the screen)"
+    fi
 elif ! systemctl is-enabled getty@tty1.service 2>/dev/null | grep -q masked; then
-    # The single most common way this install looks broken afterwards: the login
-    # console takes tty1 back and the monitor shows a login prompt instead of the
-    # terminal. It is not a crash and the journal shows nothing, so say it here.
-    say "Warning: getty@tty1 is not masked"
+    # --no-kiosk: they asked for the console, but it will take the VT back and
+    # the monitor will show a login prompt instead of the terminal. Nothing
+    # crashes and the journal stays silent, so it has to be said here.
+    say "Warning: --no-kiosk, and getty@tty1 is not masked"
     info "The login console will fight the terminal for the display, and the"
-    info "monitor will drop back to a login prompt. To stop that:"
-    info "  ./install.sh --kiosk        (or: sudo systemctl mask getty@tty1.service)"
-    info "Undo later with: sudo systemctl unmask --now getty@tty1.service"
+    info "monitor will drop back to a login prompt. Re-run without --no-kiosk,"
+    info "or: sudo systemctl mask --now getty@tty1.service"
 fi
 
 # A desktop image is the other way the display gets taken: X/Wayland holds DRM
