@@ -81,31 +81,55 @@ int netlink_connect_telnet(const char *host, int port) {
     }
 
     int s = -1;
+    int last_err = 0;                                    // why the last address failed
     for (ai = res; ai; ai = ai->ai_next) {
         s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (s < 0) continue;
+        if (s < 0) { last_err = errno; continue; }
         fcntl(s, F_SETFL, O_NONBLOCK);                   // non-blocking connect w/ timeout
         int r = connect(s, ai->ai_addr, ai->ai_addrlen);
         if (r == 0) break;
         if (r < 0 && errno == EINPROGRESS) {
             struct pollfd pf = { s, POLLOUT, 0 };
-            if (poll(&pf, 1, 5000) > 0 && (pf.revents & POLLOUT)) {
+            int pr = poll(&pf, 1, 5000);
+            if (pr > 0 && (pf.revents & POLLOUT)) {
                 int err = 0; socklen_t el = sizeof err;
                 getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &el);
                 if (err == 0) break;
+                last_err = err;                          // the real refusal/unreachable
+            } else {
+                last_err = (pr == 0) ? ETIMEDOUT : errno;
             }
+        } else {
+            last_err = errno;
         }
         close(s);
         s = -1;
     }
     freeaddrinfo(res);
     if (s < 0) {
-        fprintf(stderr, "netlink: connect to %s:%s failed: %s\n", host, portstr, strerror(errno));
+        // Report the error the connect actually failed with. errno at this point
+        // is a stale EINPROGRESS from the non-blocking connect, so it would
+        // otherwise log "Operation now in progress" for every failure.
+        fprintf(stderr, "netlink: connect to %s:%s failed: %s\n",
+                host, portstr, strerror(last_err ? last_err : ECONNREFUSED));
         return -1;
     }
 
     int one = 1;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+
+    // Keepalive probes: without them a server that disappears without closing
+    // the connection (unplugged cable, crashed host, NAT timeout) leaves us
+    // reading a socket that never returns EOF, so the drop is never noticed and
+    // the reconnect logic never runs. TCP_KEEP* are Linux-specific; if the
+    // kernel rejects any of them the connection still works, just with the
+    // system-default (2 hour) idle time.
+    setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);
+    int ka_idle = TCP_KEEPALIVE_IDLE_S, ka_intvl = TCP_KEEPALIVE_INTVL_S, ka_cnt = TCP_KEEPALIVE_CNT;
+    setsockopt(s, IPPROTO_TCP, TCP_KEEPIDLE,  &ka_idle,  sizeof ka_idle);
+    setsockopt(s, IPPROTO_TCP, TCP_KEEPINTVL, &ka_intvl, sizeof ka_intvl);
+    setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT,   &ka_cnt,   sizeof ka_cnt);
+
     fcntl(s, F_SETFL, O_NONBLOCK);
 
     fd = s;
@@ -160,7 +184,17 @@ static int spawn_pty(char *const argv[]) {
 int netlink_connect_ssh(const char *dest) {
     netlink_close();
     if (!dest || !dest[0]) return -1;
-    char *argv[] = { "ssh", "-o", "StrictHostKeyChecking=accept-new", (char *)dest, NULL };
+    // ServerAlive* makes ssh give up (and exit, hanging up the PTY) on a host
+    // that has gone away, which is what turns a wedged session into a detected
+    // drop the reconnect logic can act on. Without it ssh waits forever.
+    char alive_int[48], alive_cnt[48];
+    snprintf(alive_int, sizeof alive_int, "ServerAliveInterval=%d", SSH_ALIVE_INTERVAL_S);
+    snprintf(alive_cnt, sizeof alive_cnt, "ServerAliveCountMax=%d", SSH_ALIVE_COUNT_MAX);
+    char *argv[] = { "ssh",
+                     "-o", "StrictHostKeyChecking=accept-new",
+                     "-o", alive_int,
+                     "-o", alive_cnt,
+                     (char *)dest, NULL };
     if (spawn_pty(argv) != 0) return -1;
     fprintf(stderr, "netlink: ssh %s (pid %d)\n", dest, (int)child_pid);
     return 0;

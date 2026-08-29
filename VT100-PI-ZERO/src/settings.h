@@ -22,6 +22,7 @@ typedef struct {
     int  telnet_port;       // default 23
     char ssh_host[128];     // "" = none; else "host"/"user@host", connect ssh on boot
     int  local_shell;       // 1 = connect a local Pi shell (highest priority)
+    int  auto_reconnect;    // 1 = re-dial a dropped ssh/telnet/shell link
 } settings_t;
 
 extern settings_t g_settings;

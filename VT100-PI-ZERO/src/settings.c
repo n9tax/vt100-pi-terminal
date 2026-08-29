@@ -37,6 +37,11 @@ static const char *DEFAULT_FILE =
     "telnet_host =\n"
     "telnet_port = 23\n"
     "\n"
+    "# Re-dial the link on its own when it drops (server reboot, ssh timeout,\n"
+    "# `exit` in the shell). Backoff is 1s doubling to 30s. Off = the link stays\n"
+    "# down until you reconnect from Setup (Ctrl+F3 -> Host link -> Enter).\n"
+    "auto_reconnect = on\n"
+    "\n"
     "# ---- Display ----\n"
     "theme      = amber      # color amber green white blue red yellow c64 vic20 c128 borland custom\n"
     "cursor     = block      # block | underline\n"
@@ -93,6 +98,7 @@ static void set_defaults(void) {
     g_settings.telnet_port = TELNET_PORT_DEFAULT;
     snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", SSH_HOST_DEFAULT);
     g_settings.local_shell = LOCAL_SHELL_DEFAULT;
+    g_settings.auto_reconnect = AUTO_RECONNECT_DEFAULT;
 }
 
 static void resolve_path(void) {
@@ -144,6 +150,7 @@ static void apply(const char *key, const char *val) {
     else if (!strcasecmp(key, "telnet_port"))   g_settings.telnet_port = atoi(val);
     else if (!strcasecmp(key, "ssh_host"))      snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", val);
     else if (!strcasecmp(key, "local_shell"))   g_settings.local_shell = parse_bool(val, g_settings.local_shell);
+    else if (!strcasecmp(key, "auto_reconnect")) g_settings.auto_reconnect = parse_bool(val, g_settings.auto_reconnect);
     else fprintf(stderr, "settings: ignoring unknown key '%s'\n", key);
 }
 
@@ -221,6 +228,10 @@ void settings_save(void) {
         "telnet_host = %s\n"
         "telnet_port = %d\n"
         "\n"
+        "# Re-dial the link on its own when it drops (backoff 1s doubling to 30s).\n"
+        "# Off = it stays down until Setup (Ctrl+F3) -> Host link -> Enter.\n"
+        "auto_reconnect = %s\n"
+        "\n"
         "# ---- Display ----\n"
         "theme      = %s      # color amber green white blue red yellow c64 vic20 c128 borland custom\n"
         "cursor     = %s      # block | underline\n"
@@ -241,6 +252,7 @@ void settings_save(void) {
         g_settings.serial_dev, g_settings.baud,
         g_settings.local_shell ? "on" : "off",
         g_settings.ssh_host, g_settings.telnet_host, g_settings.telnet_port,
+        g_settings.auto_reconnect ? "on" : "off",
         settings_theme_name(g_settings.theme),
         g_settings.cursor_style ? "underline" : "block",
         g_settings.local_echo ? "on" : "off",

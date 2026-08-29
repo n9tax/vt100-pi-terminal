@@ -72,6 +72,7 @@ font       =             # empty = DejaVu (default), a bundled name, or an absol
 ssh_host    =            # host or user@host: connect via the system ssh on boot
 telnet_host =            # hostname/IP: connect over Telnet on boot
 telnet_port = 23
+auto_reconnect = on      # re-dial the link on its own when it drops
 ```
 
 Set `ssh_host` (`user@host`) or `telnet_host` and the terminal connects to it on
@@ -79,6 +80,31 @@ boot instead of using serial (`ssh_host` wins if both are set), routing keystrok
 to the connection and falling back to serial if it fails or drops. SSH runs the
 Pi's own `ssh` client over a PTY, so host-key and password prompts appear in the
 terminal as normal. Leave both empty for the serial host link.
+
+### When the session drops
+
+A network session ends for all sorts of reasons — the server reboots, ssh times
+out, a cable comes loose, you type `exit`. The terminal notices and prints a
+line saying so, then:
+
+- **`auto_reconnect = on`** (the default) re-dials on its own, backing off 1s,
+  2s, 4s … up to 30s between attempts, and says what it is doing each time. A
+  link that stayed up for at least 10 seconds gets a fresh 1s backoff on its
+  next drop; one that dies on contact (bad password, wrong port) keeps backing
+  off rather than hammering the server.
+- **`auto_reconnect = off`** leaves the link down until you reconnect by hand.
+
+Either way, Setup (**Ctrl+F3**) has a **Host link** row showing the live state —
+`connected: ssh pi@10.0.0.5`, `closed - retry in 8s`, and so on — and **Enter**
+on that row re-dials immediately. That is the manual reconnect: it works even
+when nothing about the destination has changed, so you no longer have to edit
+the host address and edit it back to force a reconnect.
+
+Serial keeps working the whole time: while a network link is down the terminal
+falls back to the RS232 host link, and picks the network link back up when it
+returns. TCP keepalives and ssh's `ServerAlive` options are set on the
+connection, so a peer that vanishes without hanging up is still detected (within
+about a minute) rather than leaving a wedged session.
 
 Smooth scroll slides the screen up a few pixels per frame instead of jumping a
 whole line. A single new line glides in over a few frames; when lines pile up it
@@ -108,7 +134,8 @@ fields, Left/Right change a value (baud, theme, cursor, echo), typing edits the
 text fields (serial device, font) with Backspace to delete, **Enter** saves and
 applies, **Ctrl+F3** again cancels. Theme/cursor/echo apply instantly; a changed
 serial device/baud reopens the link and a changed font rebuilds the glyph atlas
-live — no restart.
+live — no restart. On the **Host link** row **Enter** reconnects instead of
+saving (see "When the session drops" above).
 
 ## Boot straight into the terminal (kiosk mode)
 

@@ -15,4 +15,8 @@ void setup_toggle(void);
 // Feed one decoded key byte (from kbd_getc) to the menu while it is active.
 void setup_feed(uint8_t byte);
 
+// Repaint the menu if it is open. The main loop calls this a few times a second
+// so the "Host link" row's live status (and its reconnect countdown) ticks.
+void setup_refresh(void);
+
 #endif // SETUP_H

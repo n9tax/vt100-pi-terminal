@@ -24,7 +24,7 @@
 #include "io/serial_linux.h"
 #include "io/kbd_evdev.h"
 #include "io/host_link.h"
-#include "net/netlink.h"
+#include "net/hostconn.h"
 #include "terminal/screen.h"
 #include "terminal/vt100.h"
 
@@ -140,13 +140,10 @@ int main(void) {
 
     // Optional non-serial host link: connect on boot if configured, routing
     // keyboard/replies out that connection instead of the serial port. Priority:
-    // local shell > ssh > telnet > serial.
-    netlink_set_emit(net_emit);
-    if ((g_settings.local_shell && netlink_connect_shell() == 0) ||
-        (g_settings.ssh_host[0] && netlink_connect_ssh(g_settings.ssh_host) == 0) ||
-        (g_settings.telnet_host[0] &&
-         netlink_connect_telnet(g_settings.telnet_host, g_settings.telnet_port) == 0))
-        host_link_set_write_fn(netlink_write);
+    // local shell > ssh > telnet > serial. hostconn owns the choice from here
+    // on, and re-dials the link if it drops (see net/hostconn.c).
+    hostconn_set_emit(net_emit);
+    hostconn_start();
 
     splash_draw();
     int booting = 1;
@@ -154,6 +151,7 @@ int main(void) {
     long long next_blink = now_ms() + 500;
     long long flash_until = -1;   // -1 = no visual-bell flash pending
     long long kbd_retry = 0;      // last keyboard-rescan time (ms)
+    long long last_setup_paint = 0;   // last Setup repaint (its status row ticks)
     int blink = 0;
     long long last_out = 0;       // last host-output time (for idle cursor)
     int cur_shown = 0;            // is the cursor currently painted?
@@ -165,7 +163,7 @@ int main(void) {
 
     while (1) {
         pfds[0].fd = serial_fd();    // may change if serial was reopened in Setup
-        pfds[2].fd = netlink_fd();   // changes on connect/disconnect
+        pfds[2].fd = hostconn_fd();  // changes on connect/disconnect
         for (int i = 0; i < KBD_MAX_DEVS; ++i)
             pfds[PFD_KBD0 + i].fd = kbd_fd_at(i);   // -1 past the open count
 
@@ -190,6 +188,13 @@ int main(void) {
 
         if (!booting && kbd_take_setup_toggle()) setup_toggle();
 
+        // Service the network/PTY link every iteration, including while Setup is
+        // open: it drains received bytes into the ring (drained once Setup
+        // closes), spots a dropped session and runs the reconnect backoff. Doing
+        // it here rather than in the terminal branch keeps the Setup menu's
+        // "Host link" row live and stops a retry stalling behind an open menu.
+        hostconn_poll();
+
         if (booting) {
             // Boot self-test splash: hold until RETURN, then open a clean terminal.
             int k;
@@ -204,16 +209,19 @@ int main(void) {
             // Setup owns the screen: route keys to the menu, pause the host link.
             int k;
             while ((k = kbd_getc()) >= 0) setup_feed((uint8_t)k);
+            // Repaint a few times a second so the Host link row's countdown and
+            // an auto-reconnect landing mid-menu are visible as they happen.
+            if (now_ms() - last_setup_paint > 250) {
+                setup_refresh();
+                last_setup_paint = now_ms();
+            }
         } else {
             int activity = 0;
 
-            // Host -> ring. From the network if connected (Telnet-filtered bytes
-            // arrive via net_emit), else from the serial port. If the network link
-            // drops, fall back to serial.
-            if (netlink_connected()) {
-                netlink_poll();
-                if (!netlink_connected()) host_link_set_write_fn(serial_write);
-            } else {
+            // Host -> ring. Network bytes are already pushed by hostconn_poll()
+            // above (via net_emit); the serial port is read only while no
+            // network link is up, so a dropped session falls back to RS232.
+            if (!hostconn_connected()) {
                 int c;
                 while ((c = serial_getc()) >= 0) inbuf_push((uint8_t)c);
             }

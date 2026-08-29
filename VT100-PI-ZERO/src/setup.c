@@ -9,8 +9,7 @@
 #include "video/fonts.h"
 #include "video/themes.h"
 #include "io/serial_linux.h"
-#include "io/host_link.h"
-#include "net/netlink.h"
+#include "net/hostconn.h"
 #include "service.h"
 
 #include <string.h>
@@ -20,12 +19,17 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_THEME, F_FG, F_BG,
-       F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_FONT, F_BOOT, NFIELDS };
+enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
+       F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_FONT, F_BOOT,
+       NFIELDS };
 
 static int is_text_field(int i) {
     return i == F_SERIAL || i == F_FG || i == F_BG || i == F_SSH || i == F_TELNET;
 }
+
+// Action rows do something when Enter lands on them, instead of the usual
+// save-and-close. Currently just the manual reconnect.
+static int is_action_field(int i) { return i == F_LINK; }
 
 static int active;
 static int sel;
@@ -75,6 +79,8 @@ static void field_value(int i, char *out, size_t n) {
         case F_SSH:    snprintf(out, n, "%s", work.ssh_host); break;
         case F_TELNET: snprintf(out, n, "%s", work.telnet_host); break;
         case F_TPORT:  snprintf(out, n, "%d", work.telnet_port); break;
+        case F_AUTOREC: snprintf(out, n, "%s", work.auto_reconnect ? "on" : "off"); break;
+        case F_LINK:   snprintf(out, n, "%s", hostconn_status()); break;
         case F_THEME:  snprintf(out, n, "%s", settings_theme_name(work.theme)); break;
         case F_FG:     snprintf(out, n, "%s", work.fg_hex); break;
         case F_BG:     snprintf(out, n, "%s", work.bg_hex); break;
@@ -95,8 +101,9 @@ static void field_value(int i, char *out, size_t n) {
 static void draw(void) {
     static const char *labels[NFIELDS] = {
         "Local shell", "Serial device", "Baud rate", "SSH host", "Telnet host",
-        "Telnet port", "Theme", "Custom FG", "Custom BG", "Cursor", "Local echo",
-        "Smooth scroll", "Scroll speed", "Font", "Start at boot",
+        "Telnet port", "Auto reconnect", "Host link", "Theme", "Custom FG",
+        "Custom BG", "Cursor", "Local echo", "Smooth scroll", "Scroll speed",
+        "Font", "Start at boot",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
@@ -121,9 +128,13 @@ static void draw(void) {
         put(r, 22, val, selrow ? 0 : 7, selrow ? 7 : 0, 0);   // selected = reverse video
     }
 
-    put(TERM_ROWS - 4, 4, "Up/Down: field    Left/Right: change value", 7, 0, 0);
-    put(TERM_ROWS - 3, 4, "Serial/SSH/Telnet hosts are typed (Backspace deletes)", 7, 0, 0);
-    put(TERM_ROWS - 2, 4, "Enter: save & apply/connect     Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
+    // Two help lines only: with the reconnect rows added the field list runs to
+    // the third-from-last row.
+    if (is_action_field(sel))
+        put(TERM_ROWS - 2, 4, "Enter: reconnect now            Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
+    else
+        put(TERM_ROWS - 2, 4, "Enter: save & apply/connect     Ctrl+F3: cancel", 7, 0, ATTR_BOLD);
+    put(TERM_ROWS - 3, 4, "Up/Down: field   Left/Right: change   hosts are typed", 7, 0, 0);
 
     textmode_render_all();
 }
@@ -151,6 +162,8 @@ static void change(int d) {
             break;
         }
         case F_SHELL:  work.local_shell ^= 1; break;
+        case F_AUTOREC: work.auto_reconnect ^= 1; break;
+        case F_LINK:   break;   // an action row: Enter drives it, not Left/Right
         case F_BOOT:   boot_flag ^= 1; break;
         case F_THEME:  { int nt = themes_count(); work.theme = (work.theme + d + nt) % nt; break; }
         case F_CURSOR: work.cursor_style ^= 1; break;
@@ -206,7 +219,11 @@ static void restore_screen(void) {
     textmode_render_all();
 }
 
-static void do_save(void) {
+// Save and apply. force_reconnect re-dials the host link even when nothing
+// about the destination changed -- that is the manual "Host link" action, and
+// the reason a dropped session used to need the destination edited and edited
+// back before Setup would reconnect it.
+static void do_save(int force_reconnect) {
     g_settings = work;
     settings_save();
 
@@ -221,23 +238,19 @@ static void do_save(void) {
     if (strcmp(work.font_path, orig.font_path) != 0)
         textmode_reload_font();
 
-    // (Re)connect the host link if the destination changed. Priority:
-    // local shell > ssh > telnet > serial. Prompts appear once the menu closes.
-    if (work.local_shell != orig.local_shell ||
-        strcmp(work.ssh_host, orig.ssh_host) != 0 ||
-        strcmp(work.telnet_host, orig.telnet_host) != 0 ||
-        work.telnet_port != orig.telnet_port) {
-        netlink_close();
-        if (work.local_shell && netlink_connect_shell() == 0)
-            host_link_set_write_fn(netlink_write);
-        else if (work.ssh_host[0] && netlink_connect_ssh(work.ssh_host) == 0)
-            host_link_set_write_fn(netlink_write);
-        else if (work.telnet_host[0] &&
-                 netlink_connect_telnet(work.telnet_host, work.telnet_port) == 0)
-            host_link_set_write_fn(netlink_write);
-        else
-            host_link_set_write_fn(serial_write);
-    }
+    // (Re)connect the host link when asked to, when the destination changed, or
+    // when auto-reconnect was just switched on over a link that is already down.
+    // hostconn owns the priority chain (local shell > ssh > telnet > serial) and
+    // the retry backoff. Prompts appear once the menu closes.
+    int dest_changed = work.local_shell != orig.local_shell ||
+                       strcmp(work.ssh_host, orig.ssh_host) != 0 ||
+                       strcmp(work.telnet_host, orig.telnet_host) != 0 ||
+                       work.telnet_port != orig.telnet_port;
+    int auto_just_on = work.auto_reconnect && !orig.auto_reconnect && !hostconn_connected();
+    if (force_reconnect)
+        hostconn_reconnect_now();   // announces itself, so the manual dial is visible
+    else if (dest_changed || auto_just_on)
+        hostconn_start();
 
     // Start-at-boot: install/enable or disable the systemd unit when toggled.
     if (boot_flag != boot_orig) {
@@ -272,6 +285,8 @@ void setup_toggle(void) {
     }
 }
 
+void setup_refresh(void) { if (active) draw(); }
+
 void setup_feed(uint8_t b) {
     if (!active) return;
 
@@ -292,7 +307,7 @@ void setup_feed(uint8_t b) {
         esc = 0;                             // stray ESC; fall through
     }
     if (b == 0x1b) { esc = 1; return; }
-    if (b == '\r' || b == '\n') { do_save(); return; }
+    if (b == '\r' || b == '\n') { do_save(is_action_field(sel)); return; }
     if (b == '\t') { move_sel(+1); draw(); return; }
 
     if (is_text_field(sel)) edit_text(b);

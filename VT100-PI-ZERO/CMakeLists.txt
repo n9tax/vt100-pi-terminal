@@ -30,6 +30,7 @@ add_executable(vt100-pi-zero
         src/io/host_link.c
         src/net/telnet.c
         src/net/netlink.c
+        src/net/hostconn.c
         )
 
 target_include_directories(vt100-pi-zero PRIVATE

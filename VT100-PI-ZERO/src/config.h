@@ -61,4 +61,25 @@
 // serial/network host. Highest priority when on.
 #define LOCAL_SHELL_DEFAULT 0
 
+// ---- Reconnect --------------------------------------------------------------
+// A network/PTY host link can end at any time (server reboot, ssh timeout, a
+// pulled cable, `exit` in the shell). When auto-reconnect is on, the link is
+// re-dialled on its own with an exponential backoff; either way Setup (Ctrl+F3)
+// has a "Host link" row whose Enter re-dials immediately.
+#define AUTO_RECONNECT_DEFAULT 1
+#define RECONNECT_DELAY_MIN_MS  1000    // first retry, then doubling
+#define RECONNECT_DELAY_MAX_MS 30000    // backoff ceiling
+// A link must stay up this long to count as "good"; only then does the next
+// drop start over at RECONNECT_DELAY_MIN_MS. Without it a link that dies
+// immediately (bad host key, refused login) would retry every second forever.
+#define RECONNECT_STABLE_MS    10000
+
+// Keepalives, so a peer that vanishes without closing the connection (unplugged
+// cable, crashed server) actually surfaces as a drop instead of hanging forever.
+#define TCP_KEEPALIVE_IDLE_S   30       // idle before the first probe
+#define TCP_KEEPALIVE_INTVL_S  10       // between probes
+#define TCP_KEEPALIVE_CNT       3       // failed probes before the link is dead
+#define SSH_ALIVE_INTERVAL_S   15       // ssh -o ServerAliveInterval
+#define SSH_ALIVE_COUNT_MAX     3       // ssh -o ServerAliveCountMax
+
 #endif // VT100_CONFIG_H
