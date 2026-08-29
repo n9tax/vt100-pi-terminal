@@ -96,6 +96,7 @@ static void console_take(void) {
 static uint8_t inbuf[INBUF_SIZE];
 static int inbuf_head, inbuf_tail;
 static int inbuf_nl;                 // running count of buffered newlines (look-ahead)
+static unsigned long inbuf_lines_total;   // every line ever received: the host's rate
 
 static int  inbuf_empty(void) { return inbuf_head == inbuf_tail; }
 static int  inbuf_pending_lines(void) { return inbuf_nl; }
@@ -104,7 +105,7 @@ static void inbuf_push(uint8_t b) {
     if (next == inbuf_tail) return;   // full: drop (very deep backlog; rare)
     inbuf[inbuf_head] = b;
     inbuf_head = next;
-    if (b == '\n') ++inbuf_nl;
+    if (b == '\n') { ++inbuf_nl; ++inbuf_lines_total; }
 }
 static int inbuf_pop(void) {
     if (inbuf_empty()) return -1;
@@ -288,7 +289,7 @@ int main(void) {
             // screen the ring is not drained, so sampling there would read as a
             // growing overrun that is really just the menu being open.
             flow_sample(inbuf_pending_lines(), textmode_scroll_busy(), fed);
-            autospeed_update(inbuf_pending_lines(), fed, now_ms());
+            autospeed_update(inbuf_lines_total, inbuf_pending_lines(), fed, now_ms());
 
             // Keyboard -> host, + optional local echo.
             uint8_t kb[64]; int kn = 0, k;

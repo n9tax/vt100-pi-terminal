@@ -78,6 +78,7 @@ scroll_speed  = 600      # pixels/second (a line is ~32px; bursts catch up)
 scroll_depth  = 2        # lines of slide in flight (pacing depth)
 scroll_dump   = 80       # backlog in lines past which the screen dump-resets
 auto_speed    = off      # closed loop: trim the speed to match the host's rate
+speed_avg_ms  = 4000     # how long auto_speed averages the host rate over
 fg_color   = #FFFFFF     # custom-theme foreground (used when theme = custom)
 bg_color   = #000000     # custom-theme background
 font       =             # empty = DejaVu (default), a bundled name, or an absolute .ttf path
@@ -174,18 +175,35 @@ runs away nor runs dry. `scroll_speed` stops being a fixed rate and becomes the
 starting point and the resting speed; the Scroll speed row shows both
 (`300 px/s  (auto: 465)`).
 
-It is deliberately sluggish — it recomputes 4x a second and ramps at most
-25 px/s per step, because a speed that visibly surges is worse than one that is
-merely wrong. It can rise to the maximum but will only fall to half the
+**`speed_avg_ms`** (250–8000, default 4000) is how long the host's rate is
+averaged over before the speed follows it. Longer is steadier and slower to
+react. It is the knob to reach for if the speed looks restless.
+
+Two things stop it looking restless by default:
+
+- **It measures the host, not itself.** The rate is taken from lines *received*
+  over the averaging window — never from lines displayed, which the scroll
+  itself throttles, so feeding that back would only measure its own output.
+- **A 20% deadband.** A real VT100 scrolls at one fixed rate; a speed that
+  faithfully tracks every fluctuation in the host is accurate and looks
+  restless. So it holds the current speed until the requirement differs by more
+  than a fifth, then steps and holds again. In simulation that is the difference
+  between changing speed ~230 times a minute and ~30, holding one steady rate
+  ~85% of the time.
+
+It is also deliberately sluggish — recomputing 4x a second, ramping at most
+15 px/s per step. It can rise to the maximum but will only fall to half the
 configured speed: rate-matching a slow host all the way down would make each
 line crawl, which is fine for watching a log and awful at a shell prompt. After
 two seconds of silence it unwinds back to the configured speed, so every burst
 starts from a known rate.
 
-The D term is present but its gain is **0**. The backlog is a small, quantised,
-bursty integer, and differentiating it turns sampling noise into visible speed
-wobble — worse than the error it would correct. P and I do the work; I is what
-actually matches the rates.
+There is **no integral and no derivative term**, despite the name. The plant is
+already an integrator — a speed error accumulates into backlog — so an integral
+controller on top makes a double integrator, and that hunts: adding one was what
+made the speed visibly swing, and adding *more* filtering to it made the swing
+worse, not better. A rate feedforward does the work; a small capped proportional
+trim on the backlog stops it drifting.
 
 Off by default: it is a different feel, not a fix, and a fixed speed is the
 calmer choice for reading.

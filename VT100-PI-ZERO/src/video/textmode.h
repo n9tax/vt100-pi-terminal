@@ -68,6 +68,10 @@ int  textmode_scroll_busy(void);             // 1 while a slide is in flight
 void textmode_scroll_snap(void);             // finish any slide immediately
 void textmode_set_scroll_pace(int backlog);  // (pacing is derived internally)
 
+// Row height in pixels, negotiated from the display mode at init. The
+// auto-speed controller needs it to convert a line rate into a pixel rate.
+int textmode_line_height(void);
+
 // Change the pan speed (px/s) without touching the smooth on/off state.
 void textmode_set_scroll_speed(int pps);
 

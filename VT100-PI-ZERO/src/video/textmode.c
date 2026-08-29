@@ -419,6 +419,8 @@ void textmode_set_backlog(int lines) { backlog_lines = lines < 0 ? 0 : lines; }
 // True while there's room to feed another line into the animation. The main loop
 // gates paced feeding on this so at most ~2 lines slide at once and the ring
 // absorbs the rest. When smooth scroll is off, always feed (no pacing).
+int textmode_line_height(void) { return line_h; }
+
 int textmode_feed_room(void) { return !smooth_on || d < scroll_depth * line_h; }
 
 // Pacing depth from settings, clamped to what the scroll headroom can hold: a

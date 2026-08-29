@@ -74,24 +74,50 @@
 #define AUTO_SPEED_TARGET_LINES 4
 
 // Gains. Error is in lines, output in px/s.
-//   P  immediate response to the current error
-//   I  removes the standing offset, which is what actually matches the rates
-//   D  deliberately 0 -- the backlog is a small, quantised, bursty integer, and
-//      differentiating it amplifies sampling noise into a visible speed wobble,
-//      which on a scroll is worse than the error it would correct. The term is
-//      implemented so it can be tried; it is not on.
-#define AUTO_SPEED_KP  24
-#define AUTO_SPEED_KI   6
-#define AUTO_SPEED_KD   0
+// There is no integral term and no derivative term, and that is deliberate.
+// The plant is already an integrator -- a speed error accumulates into backlog --
+// so an integral controller on top makes a double integrator, which hunts. A
+// derivative on a small, bursty, quantised line count is mostly sampling noise.
+// The rate feedforward does the work; KP only corrects slow drift, and is capped
+// so that a saturated error (backlog pinned at 0 between bursts) cannot drive
+// the speed on its own.
+// Guarded so a test harness can sweep them without editing this file.
+#ifndef AUTO_SPEED_KP
+#define AUTO_SPEED_KP   4      // px/s per line of backlog error
+#endif
+#ifndef AUTO_SPEED_TRIM_MAX
+#define AUTO_SPEED_TRIM_MAX 120   // px/s: the trim corrects drift, it does not drive
+#endif
+
+// Averaging window for the measured backlog, in ms -- the time constant of a
+// first-order lag over it. The backlog is a small, bursty integer: real output
+// arrives in clumps, so sampling it raw makes the P term jump and the scroll
+// visibly swing (a few lines of wobble times KP is a large fraction of the
+// speed). Averaging is what makes the controller look like a steady hand rather
+// than a twitchy one. Longer = smoother but slower to react.
+#define AUTO_SPEED_AVG_DEFAULT 4000
+#define AUTO_SPEED_AVG_MIN      250
+#define AUTO_SPEED_AVG_MAX     8000
 
 // Control period and slew limit. Speed changes must be gradual or the scroll
 // visibly surges; this caps the ramp at AUTO_SPEED_SLEW px/s per update.
-#define AUTO_SPEED_PERIOD_MS 250
-#define AUTO_SPEED_SLEW       25
+// Deadband, as a percentage of the current speed. A real VT100 scrolls at one
+// fixed rate; a speed that continuously tracks every fluctuation in the host
+// reads as restless, however accurate it is. So hold the current speed until the
+// measured requirement differs by more than this, then move to it and hold
+// again. The result is long stretches of genuinely constant speed with
+// occasional steps, which is what looks right.
+#ifndef AUTO_SPEED_DEADBAND_PCT
+#define AUTO_SPEED_DEADBAND_PCT 20
+#endif
 
-// Integral windup clamp (in line-seconds), and how long output must be quiet
-// before the controller eases back to the configured base speed.
-#define AUTO_SPEED_I_CLAMP  40
+#define AUTO_SPEED_PERIOD_MS 250
+#ifndef AUTO_SPEED_SLEW
+#define AUTO_SPEED_SLEW       15
+#endif
+
+// How long output must be quiet before the controller eases back to the
+// configured base speed.
 #define AUTO_SPEED_IDLE_MS 2000
 
 // How far below the configured speed the controller may go, as a divisor of it.

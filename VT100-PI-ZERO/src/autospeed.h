@@ -21,7 +21,10 @@ void autospeed_set(int on, int base_pps, long long now_ms);
 // Feed one sample from the main loop's terminal branch. Self-timed: it only
 // recomputes every AUTO_SPEED_PERIOD_MS and applies its own slew limit, so
 // calling it every iteration is correct and cheap. A no-op when disabled.
-void autospeed_update(int backlog, int fed, long long now_ms);
+//   lines_in  monotonic count of lines *received* from the host (not displayed)
+//   backlog   lines currently buffered
+//   fed       1 if anything reached the terminal this iteration
+void autospeed_update(unsigned long lines_in, int backlog, int fed, long long now_ms);
 
 int autospeed_enabled(void);
 int autospeed_pps(void);      // the speed currently in effect, for Setup's display

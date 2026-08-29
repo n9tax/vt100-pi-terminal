@@ -24,15 +24,18 @@
 
 enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
        F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_AUTOSPD,
-       F_DEPTH, F_DUMP, F_FONT, F_BOOT, NFIELDS };
+       F_AVG, F_DEPTH, F_DUMP, F_FONT, F_BOOT, NFIELDS };
 
-// Layout. The field list now fills the grid exactly -- title, address, buffer
-// line, then NFIELDS rows, then a single help line on the last row. There is no
-// room left: another setting needs the menu paginated, not another row.
+// Layout: title, address, buffer line, the field list, one help line on the
+// last row. There are more fields than rows now, so the list scrolls to keep the
+// selection visible rather than being paginated -- it stays one flat list, and
+// it keeps working however many settings get added.
 #define ROW_TITLE  0
 #define ROW_STATUS 1
 #define ROW_BUFFER 2
 #define ROW_FIELD0 3
+#define FIELD_ROWS (TERM_ROWS - ROW_FIELD0 - 1)
+static int first_vis;   // index of the field drawn on ROW_FIELD0
 
 static int is_text_field(int i) {
     return i == F_SERIAL || i == F_FG || i == F_BG || i == F_SSH || i == F_TELNET;
@@ -124,6 +127,7 @@ static void field_value(int i, char *out, size_t n) {
                 snprintf(out, n, "%d px/s", work.scroll_speed);
             break;
         case F_AUTOSPD: snprintf(out, n, "%s", work.auto_speed ? "on" : "off"); break;
+        case F_AVG:    snprintf(out, n, "%d ms", work.speed_avg_ms); break;
         case F_FONT: {
             int idx = fonts_index_of(work.font_path);
             if (idx >= 0) snprintf(out, n, "%s", fonts_name(idx));
@@ -139,7 +143,8 @@ static void draw(void) {
         "Local shell", "Serial device", "Baud rate", "SSH host", "Telnet host",
         "Telnet port", "Auto reconnect", "Host link", "Theme", "Custom FG",
         "Custom BG", "Cursor", "Local echo", "Smooth scroll", "Scroll speed",
-        "Auto speed", "Scroll depth", "Overrun limit", "Font", "Start at boot",
+        "Auto speed", "Speed averaging", "Scroll depth", "Overrun limit", "Font",
+        "Start at boot",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
@@ -155,8 +160,14 @@ static void draw(void) {
     snprintf(hdr, sizeof hdr, "Buffer: %s", flow_status());
     put(ROW_BUFFER, 4, hdr, 7, 0, 0);
 
-    for (int i = 0; i < NFIELDS; ++i) {
-        int r = ROW_FIELD0 + i;
+    // Scroll the list so the selection is always on screen.
+    if (sel < first_vis) first_vis = sel;
+    if (sel >= first_vis + FIELD_ROWS) first_vis = sel - FIELD_ROWS + 1;
+    if (first_vis > NFIELDS - FIELD_ROWS) first_vis = NFIELDS - FIELD_ROWS;
+    if (first_vis < 0) first_vis = 0;
+
+    for (int i = first_vis; i < first_vis + FIELD_ROWS && i < NFIELDS; ++i) {
+        int r = ROW_FIELD0 + (i - first_vis);
         int selrow = (i == sel);
         char val[300];
         field_value(i, val, sizeof val);
@@ -169,10 +180,17 @@ static void draw(void) {
         put(r, 22, val, selrow ? 0 : 7, selrow ? 7 : 0, 0);   // selected = reverse video
     }
 
+    // Show that the list continues past the visible rows.
+    if (first_vis > 0)
+        put(ROW_FIELD0, 2, "\x18", 7, 0, 0);                       // up arrow
+    if (first_vis + FIELD_ROWS < NFIELDS)
+        put(ROW_FIELD0 + FIELD_ROWS - 1, 2, "\x19", 7, 0, 0);      // down arrow
+
     const char *help;
     if (is_action_field(sel))
         help = "Enter: reconnect now                          Ctrl+F3: cancel";
-    else if (sel == F_SPEED || sel == F_DEPTH || sel == F_DUMP || sel == F_AUTOSPD)
+    else if (sel == F_SPEED || sel == F_DEPTH || sel == F_DUMP || sel == F_AUTOSPD
+             || sel == F_AVG)
         help = "over: raise speed/limit  under: raise depth  R: reset  Enter: save";
     else
         help = "Up/Down: field   Left/Right: change   Enter: save   Ctrl+F3: cancel";
@@ -206,6 +224,13 @@ static void change(int d) {
         case F_SHELL:  work.local_shell ^= 1; break;
         case F_AUTOREC: work.auto_reconnect ^= 1; break;
         case F_AUTOSPD: work.auto_speed ^= 1; break;
+        case F_AVG: {
+            int v = work.speed_avg_ms + d * 250;
+            if (v < AUTO_SPEED_AVG_MIN) v = AUTO_SPEED_AVG_MIN;
+            if (v > AUTO_SPEED_AVG_MAX) v = AUTO_SPEED_AVG_MAX;
+            work.speed_avg_ms = v;
+            break;
+        }
         case F_LINK:   break;   // an action row: Enter drives it, not Left/Right
         case F_BOOT:   boot_flag ^= 1; break;
         case F_THEME:  { int nt = themes_count(); work.theme = (work.theme + d + nt) % nt; break; }

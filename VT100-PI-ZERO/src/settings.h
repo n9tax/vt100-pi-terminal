@@ -21,6 +21,7 @@ typedef struct {
     int  scroll_depth;      // lines of slide allowed in flight (pacing depth)
     int  scroll_dump;       // backlog in lines past which we dump-and-reset
     int  auto_speed;        // 1 = PID-trim the scroll speed to match the host
+    int  speed_avg_ms;      // averaging window for the auto-speed measurement
     char telnet_host[128];  // "" = use serial; else connect Telnet on boot
     int  telnet_port;       // default 23
     char ssh_host[128];     // "" = none; else "host"/"user@host", connect ssh on boot
