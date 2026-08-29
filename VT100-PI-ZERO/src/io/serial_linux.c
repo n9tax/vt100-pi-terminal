@@ -4,7 +4,6 @@
 #include <termios.h>
 #include <unistd.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 
@@ -25,11 +24,14 @@ static speed_t baud_to_speed(int baud) {
     }
 }
 
-static void apply_termios(int baud) {
+// Returns 0 on success, -1 if the port could not be configured. Never exits:
+// see serial_init().
+static int apply_termios(int baud) {
+    if (fd < 0) return -1;
     struct termios tio;
     if (tcgetattr(fd, &tio) != 0) {
         fprintf(stderr, "serial: tcgetattr failed: %s\n", strerror(errno));
-        exit(1);
+        return -1;
     }
     cfmakeraw(&tio);
     speed_t sp = baud_to_speed(baud);
@@ -44,18 +46,30 @@ static void apply_termios(int baud) {
     tio.c_cc[VTIME] = 0;
     if (tcsetattr(fd, TCSANOW, &tio) != 0) {
         fprintf(stderr, "serial: tcsetattr failed: %s\n", strerror(errno));
-        exit(1);
+        return -1;
     }
+    return 0;
 }
 
-void serial_init(const char *path, int baud) {
+// A missing serial port is NOT fatal. It used to exit(1), which on a Pi whose
+// UART has not been enabled turned every boot into a restart loop -- with the
+// display and keyboard working fine and a network host link possibly
+// configured, so the terminal had every reason to come up. Warn, run without
+// it, and let Setup (Ctrl+F3) point at a device that exists or switch to
+// ssh/telnet/local shell.
+int serial_init(const char *path, int baud) {
     fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) {
         fprintf(stderr, "serial: open(%s) failed: %s\n", path, strerror(errno));
-        exit(1);
+        fprintf(stderr, "serial: continuing without a serial host link "
+                        "(enable the UART, or pick another transport in Setup)\n");
+        return -1;
     }
-    apply_termios(baud);
+    if (apply_termios(baud) != 0) { close(fd); fd = -1; return -1; }
+    return 0;
 }
+
+int serial_connected(void) { return fd >= 0; }
 
 int serial_fd(void) { return fd; }
 
@@ -80,7 +94,7 @@ void serial_write(const uint8_t *buf, uint32_t len) {
     }
 }
 
-void serial_set_baud(int baud) { apply_termios(baud); }
+void serial_set_baud(int baud) { (void)apply_termios(baud); }
 
 int serial_reconfigure(const char *path, int baud) {
     // Open the new device before dropping the old one, so a bad path from the
@@ -92,6 +106,6 @@ int serial_reconfigure(const char *path, int baud) {
     }
     if (fd >= 0) close(fd);
     fd = nf;
-    apply_termios(baud);
+    if (apply_termios(baud) != 0) { close(fd); fd = -1; return -1; }
     return 0;
 }

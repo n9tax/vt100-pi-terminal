@@ -144,7 +144,7 @@ int main(void) {
     textmode_set_smooth(g_settings.smooth_scroll, g_settings.scroll_speed);
     textmode_set_scroll_depth(g_settings.scroll_depth);
     autospeed_set(g_settings.auto_speed, g_settings.scroll_speed, now_ms());
-    serial_init(g_settings.serial_dev, g_settings.baud);
+    int serial_ok = (serial_init(g_settings.serial_dev, g_settings.baud) == 0);
     kbd_init();
     screen_init();
     vt100_init();
@@ -156,6 +156,14 @@ int main(void) {
     // on, and re-dials the link if it drops (see net/hostconn.c).
     hostconn_set_emit(net_emit);
     hostconn_start();
+
+    // Neither transport came up. Not fatal -- the display and keyboard work, and
+    // Setup can fix it -- but say so plainly, because the screen will otherwise
+    // just sit there looking broken.
+    if (!serial_ok && !hostconn_connected())
+        fprintf(stderr, "main: no host link (serial %s unavailable and no network "
+                        "destination configured) -- press Ctrl+F3 to set one up\n",
+                g_settings.serial_dev);
 
     splash_draw();
     int booting = 1;

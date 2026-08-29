@@ -47,9 +47,18 @@ root (or grant those permissions via udev rules):
 sudo ./build/vt100-pi-zero
 ```
 
-`/dev/serial0` must be free — disable the serial console getty first
-(`raspi-config` -> Interface Options -> Serial Port -> login shell: No,
-hardware enabled: Yes), or the two will fight over the UART.
+`/dev/serial0` must exist *and* be free. On a fresh Raspberry Pi OS the UART is
+off, so the device is not there at all — and if the serial console getty is
+running, it fights the terminal for the port. Both are the same setting:
+`raspi-config` -> Interface Options -> Serial Port -> login shell: **No**,
+hardware enabled: **Yes**, then reboot. Add `dtoverlay=disable-bt` to
+`/boot/firmware/config.txt` as well, so `/dev/serial0` is the PL011 rather than
+the mini-UART, whose baud drifts with the core clock.
+
+A missing port is not fatal: the terminal starts without a serial host link, logs
+why, and Setup shows the device as `(not open)`. Fix the UART and reopen it from
+Setup (Ctrl+F3 -> Enter on Serial device), or use ssh / telnet / local shell
+instead — no restart needed either way.
 
 ## Configuration
 

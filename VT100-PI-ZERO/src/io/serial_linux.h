@@ -8,8 +8,13 @@
 #include <stdint.h>
 
 // Opens `path` (e.g. SERIAL_DEV) at `baud`, 8N1, raw mode, non-blocking.
-// Exits the process on failure (no serial host link is fatal for this app).
-void serial_init(const char *path, int baud);
+// Returns 0 on success, -1 if the port is missing or unusable -- which is NOT
+// fatal: video, keyboard and any network transport still work, and Setup can
+// point at another device. serial_fd() is then -1 and poll() ignores it.
+int serial_init(const char *path, int baud);
+
+// 1 while a serial port is actually open.
+int serial_connected(void);
 
 // The fd to include in the main poll() loop.
 int serial_fd(void);

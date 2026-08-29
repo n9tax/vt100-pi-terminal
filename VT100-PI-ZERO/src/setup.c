@@ -92,7 +92,14 @@ static void field_value(int i, char *out, size_t n) {
     switch (i) {
         case F_SHELL:  snprintf(out, n, "%s", work.local_shell ? "on" : "off"); break;
         case F_BOOT:   snprintf(out, n, "%s", boot_flag ? "on" : "off"); break;
-        case F_SERIAL: snprintf(out, n, "%s", work.serial_dev); break;
+        case F_SERIAL:
+            // Flag a port that isn't actually open, so a typo or an unenabled
+            // UART is visible here instead of only in the journal.
+            if (!serial_connected() && strcmp(work.serial_dev, g_settings.serial_dev) == 0)
+                snprintf(out, n, "%s  (not open)", work.serial_dev);
+            else
+                snprintf(out, n, "%s", work.serial_dev);
+            break;
         case F_BAUD:   snprintf(out, n, "%d", work.baud); break;
         case F_SSH:    snprintf(out, n, "%s", work.ssh_host); break;
         case F_TELNET: snprintf(out, n, "%s", work.telnet_host); break;
@@ -286,7 +293,11 @@ static void do_save(int force_reconnect) {
     textmode_set_smooth(work.smooth_scroll, work.scroll_speed);
     textmode_set_scroll_depth(work.scroll_depth);
     autospeed_set(work.auto_speed, work.scroll_speed, now_ms_setup());
-    if (strcmp(work.serial_dev, orig.serial_dev) != 0 || work.baud != orig.baud)
+    // Retry when the port is currently down even if nothing changed: otherwise a
+    // serial device that was missing at boot can only be reopened by editing the
+    // path and editing it back -- the same trap the host link used to have.
+    if (strcmp(work.serial_dev, orig.serial_dev) != 0 || work.baud != orig.baud
+        || !serial_connected())
         serial_reconfigure(work.serial_dev, work.baud);
     if (strcmp(work.font_path, orig.font_path) != 0)
         textmode_reload_font();

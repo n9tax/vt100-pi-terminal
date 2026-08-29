@@ -148,6 +148,22 @@ if [ "$DO_KIOSK" -eq 1 ]; then
     info "text console on tty1 is now off (unmask to undo)"
 fi
 
+# ---- serial pre-flight ----------------------------------------------------
+# Advisory only: the terminal runs fine without a serial port (video, keyboard
+# and any network transport still work). But on a fresh Pi the UART is off by
+# default, and silently having no host link looks like a broken install.
+if [ ! -e /dev/serial0 ] && [ ! -e /dev/ttyAMA0 ] && [ ! -e /dev/ttyS0 ]; then
+    say "No serial port found"
+    info "/dev/serial0 does not exist -- the UART is not enabled on this Pi."
+    info "The terminal will still start, with no serial host link. To enable it:"
+    info "  sudo raspi-config  ->  Interface Options  ->  Serial Port"
+    info "      login shell over serial?      NO"
+    info "      serial port hardware enabled? YES"
+    info "  then add 'dtoverlay=disable-bt' to /boot/firmware/config.txt and reboot"
+    info "  (so /dev/serial0 is the PL011, whose baud does not drift)"
+    info "Or pick ssh / telnet / local shell in Setup (Ctrl+F3)."
+fi
+
 # ---- enable + start -------------------------------------------------------
 if [ "$DO_ENABLE" -eq 1 ]; then
     say "Enabling at boot"
