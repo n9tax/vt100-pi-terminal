@@ -140,13 +140,46 @@ saving (see "When the session drops" above).
 ## Boot straight into the terminal (kiosk mode)
 
 ```
-sudo cp build/vt100-pi-zero /usr/local/bin/vt100-pi-zero
+./install.sh --deps --kiosk     # first time on a fresh Pi
+./install.sh                    # every time after that (git pull && ./install.sh)
+```
+
+`install.sh` builds, installs the binary/fonts/unit, enables the service and
+starts it. It is safe to re-run: on a machine that already has it, it stops the
+running terminal, reinstalls and starts it again. The build happens *before* the
+service is stopped, so a failed build leaves the running terminal untouched, and
+the stop-before-copy is what avoids `cp`'s "Text file busy" on the live binary.
+
+Run it as your normal user, **not** under `sudo` — it escalates only for the
+steps that need root, and building as root would leave root-owned files in the
+source tree that break the next ordinary build or `git pull`. It refuses to run
+as root for that reason.
+
+| flag | effect |
+|---|---|
+| `--deps` | `apt-get` the build dependencies first |
+| `--kiosk` | also mask `getty@tty1` so the text console can't fight for tty1 |
+| `--no-enable` | install and start, but don't start at boot |
+| `--clean` | wipe the build directory first |
+| `--build-only` | build and install nothing (no root needed) |
+
+<details><summary>Equivalent manual steps</summary>
+
+```
+cmake -S . -B build && cmake --build build
+sudo systemctl stop vt100-pi.service            # before replacing a running binary
+sudo install -Dm755 build/vt100-pi-zero /usr/local/bin/vt100-pi-zero
 sudo mkdir -p /usr/local/share/vt100-pi/fonts
 sudo cp assets/*.ttf /usr/local/share/vt100-pi/fonts/   # so bundled fonts resolve off-tree
 sudo cp systemd/vt100-pi.service /etc/systemd/system/
-sudo systemctl disable getty@tty1.service
+sudo systemctl daemon-reload
+sudo systemctl mask getty@tty1.service
 sudo systemctl enable --now vt100-pi.service
 ```
+</details>
+
+Note the service runs as `root`, so the settings file it reads is
+`/root/.config/vt100-pi/vt100.conf` — not the one under your own `$HOME`.
 
 This is the closest Linux equivalent to the Pico build's instant-boot-to-
 terminal behavior. Actual boot time is still Raspberry Pi OS's normal
