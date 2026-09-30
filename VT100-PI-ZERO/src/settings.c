@@ -34,6 +34,7 @@ static const char *DEFAULT_FILE =
     "# Connect on boot instead of serial. Priority: local_shell > ssh_host > telnet_host.\n"
     "local_shell = off       # on = a local shell on the Pi (use the Pi OS directly)\n"
     "ssh_host    =           # host or user@host (uses the system ssh client)\n"
+    "ssh_port    = " STR(SSH_PORT_DEFAULT) "\n"
     "telnet_host =\n"
     "telnet_port = 23\n"
     "\n"
@@ -113,6 +114,7 @@ static void set_defaults(void) {
     snprintf(g_settings.telnet_host, sizeof g_settings.telnet_host, "%s", TELNET_HOST_DEFAULT);
     g_settings.telnet_port = TELNET_PORT_DEFAULT;
     snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", SSH_HOST_DEFAULT);
+    g_settings.ssh_port = SSH_PORT_DEFAULT;
     g_settings.local_shell = LOCAL_SHELL_DEFAULT;
     g_settings.auto_reconnect = AUTO_RECONNECT_DEFAULT;
 }
@@ -169,6 +171,7 @@ static void apply(const char *key, const char *val) {
     else if (!strcasecmp(key, "telnet_host"))   snprintf(g_settings.telnet_host, sizeof g_settings.telnet_host, "%s", val);
     else if (!strcasecmp(key, "telnet_port"))   g_settings.telnet_port = atoi(val);
     else if (!strcasecmp(key, "ssh_host"))      snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", val);
+    else if (!strcasecmp(key, "ssh_port"))      g_settings.ssh_port = clampi(atoi(val), 1, 65535);
     else if (!strcasecmp(key, "local_shell"))   g_settings.local_shell = parse_bool(val, g_settings.local_shell);
     else if (!strcasecmp(key, "auto_reconnect")) g_settings.auto_reconnect = parse_bool(val, g_settings.auto_reconnect);
     else fprintf(stderr, "settings: ignoring unknown key '%s'\n", key);
@@ -245,6 +248,7 @@ void settings_save(void) {
         "# Connect on boot instead of serial. Priority: local_shell > ssh_host > telnet_host.\n"
         "local_shell = %s\n"
         "ssh_host    = %s\n"
+        "ssh_port    = %d\n"
         "telnet_host = %s\n"
         "telnet_port = %d\n"
         "\n"
@@ -277,7 +281,7 @@ void settings_save(void) {
         "font       = %s\n",
         g_settings.serial_dev, g_settings.baud,
         g_settings.local_shell ? "on" : "off",
-        g_settings.ssh_host, g_settings.telnet_host, g_settings.telnet_port,
+        g_settings.ssh_host, g_settings.ssh_port, g_settings.telnet_host, g_settings.telnet_port,
         g_settings.auto_reconnect ? "on" : "off",
         settings_theme_name(g_settings.theme),
         g_settings.cursor_style ? "underline" : "block",

@@ -57,6 +57,9 @@ static void note(const char *fmt, ...) {
 // What the settings currently point at, in words.
 static void describe(char *out, size_t n) {
     if (g_settings.local_shell)         snprintf(out, n, "local shell");
+    else if (g_settings.ssh_host[0] && g_settings.ssh_port != 22)
+                                        snprintf(out, n, "ssh %s:%d", g_settings.ssh_host,
+                                                 g_settings.ssh_port);
     else if (g_settings.ssh_host[0])    snprintf(out, n, "ssh %s", g_settings.ssh_host);
     else if (g_settings.telnet_host[0]) snprintf(out, n, "telnet %s:%d",
                                                  g_settings.telnet_host, g_settings.telnet_port);
@@ -95,7 +98,8 @@ static int dial(void) {
     netlink_close();
     int ok = 0;
     if (g_settings.local_shell)              ok = (netlink_connect_shell() == 0);
-    else if (g_settings.ssh_host[0])         ok = (netlink_connect_ssh(g_settings.ssh_host) == 0);
+    else if (g_settings.ssh_host[0])         ok = (netlink_connect_ssh(g_settings.ssh_host,
+                                                                       g_settings.ssh_port) == 0);
     else if (g_settings.telnet_host[0])      ok = (netlink_connect_telnet(g_settings.telnet_host,
                                                                           g_settings.telnet_port) == 0);
     host_link_set_write_fn(ok ? netlink_write : serial_write);

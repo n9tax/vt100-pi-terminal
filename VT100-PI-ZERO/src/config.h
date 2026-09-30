@@ -146,6 +146,7 @@
 // (ssh_host takes precedence over telnet_host; empty both = serial).
 // ssh_host is "host" or "user@host"; telnet_host is a hostname/IP.
 #define SSH_HOST_DEFAULT    ""
+#define SSH_PORT_DEFAULT    22
 #define TELNET_HOST_DEFAULT ""
 #define TELNET_PORT_DEFAULT 23
 

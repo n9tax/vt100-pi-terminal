@@ -22,7 +22,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
+enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_SPORT, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
        F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_AUTOSPD,
        F_AVG, F_DEPTH, F_DUMP, F_FONT, F_BOOT, NFIELDS };
 
@@ -38,7 +38,8 @@ enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
 static int first_vis;   // index of the field drawn on ROW_FIELD0
 
 static int is_text_field(int i) {
-    return i == F_SERIAL || i == F_FG || i == F_BG || i == F_SSH || i == F_TELNET;
+    return i == F_SERIAL || i == F_FG || i == F_BG || i == F_SSH || i == F_SPORT ||
+           i == F_TELNET;
 }
 
 // Action rows do something when Enter lands on them, instead of the usual
@@ -105,6 +106,9 @@ static void field_value(int i, char *out, size_t n) {
             break;
         case F_BAUD:   snprintf(out, n, "%d", work.baud); break;
         case F_SSH:    snprintf(out, n, "%s", work.ssh_host); break;
+        case F_SPORT:  if (work.ssh_port > 0) snprintf(out, n, "%d", work.ssh_port);
+                       else out[0] = '\0';   // cleared mid-edit; saves as 22
+                       break;
         case F_TELNET: snprintf(out, n, "%s", work.telnet_host); break;
         case F_TPORT:  snprintf(out, n, "%d", work.telnet_port); break;
         case F_AUTOREC: snprintf(out, n, "%s", work.auto_reconnect ? "on" : "off"); break;
@@ -140,7 +144,7 @@ static void field_value(int i, char *out, size_t n) {
 
 static void draw(void) {
     static const char *labels[NFIELDS] = {
-        "Local shell", "Serial device", "Baud rate", "SSH host", "Telnet host",
+        "Local shell", "Serial device", "Baud rate", "SSH host", "SSH port", "Telnet host",
         "Telnet port", "Auto reconnect", "Host link", "Theme", "Custom FG",
         "Custom BG", "Cursor", "Local echo", "Smooth scroll", "Scroll speed",
         "Auto speed", "Speed averaging", "Scroll depth", "Overrun limit", "Font",
@@ -277,6 +281,12 @@ static void change(int d) {
 }
 
 static void edit_text(uint8_t b) {   // the typed fields: serial device, custom fg/bg
+    if (sel == F_SPORT) {   // numeric: digits append, backspace drops the last one
+        if (b == 0x7f || b == 0x08) work.ssh_port /= 10;
+        else if (b >= '0' && b <= '9' && work.ssh_port * 10 + (b - '0') <= 65535)
+            work.ssh_port = work.ssh_port * 10 + (b - '0');
+        return;
+    }
     char  *buf;
     size_t cap;
     int    hexonly = 0;
@@ -307,6 +317,7 @@ static void restore_screen(void) {
 // the reason a dropped session used to need the destination edited and edited
 // back before Setup would reconnect it.
 static void do_save(int force_reconnect) {
+    if (work.ssh_port <= 0) work.ssh_port = SSH_PORT_DEFAULT;   // left blank
     g_settings = work;
     settings_save();
 
@@ -333,6 +344,7 @@ static void do_save(int force_reconnect) {
     // the retry backoff. Prompts appear once the menu closes.
     int dest_changed = work.local_shell != orig.local_shell ||
                        strcmp(work.ssh_host, orig.ssh_host) != 0 ||
+                       work.ssh_port != orig.ssh_port ||
                        strcmp(work.telnet_host, orig.telnet_host) != 0 ||
                        work.telnet_port != orig.telnet_port;
     int auto_just_on = work.auto_reconnect && !orig.auto_reconnect && !hostconn_connected();

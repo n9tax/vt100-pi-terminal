@@ -83,6 +83,7 @@ fg_color   = #FFFFFF     # custom-theme foreground (used when theme = custom)
 bg_color   = #000000     # custom-theme background
 font       =             # empty = DejaVu (default), a bundled name, or an absolute .ttf path
 ssh_host    =            # host or user@host: connect via the system ssh on boot
+ssh_port    = 22         # set for an ssh server on a non-standard port
 telnet_host =            # hostname/IP: connect over Telnet on boot
 telnet_port = 23
 auto_reconnect = on      # re-dial the link on its own when it drops
@@ -92,7 +93,10 @@ Set `ssh_host` (`user@host`) or `telnet_host` and the terminal connects to it on
 boot instead of using serial (`ssh_host` wins if both are set), routing keystrokes
 to the connection and falling back to serial if it fails or drops. SSH runs the
 Pi's own `ssh` client over a PTY, so host-key and password prompts appear in the
-terminal as normal. Leave both empty for the serial host link.
+terminal as normal. For an ssh server on a non-standard port, set `ssh_port`
+(Setup: **SSH port**) rather than typing an `ssh://host:port` URI; at the default
+22 no `-p` is passed, so a `Port` in `/root/.ssh/config` still applies. Leave both
+empty for the serial host link.
 
 ### When the session drops
 

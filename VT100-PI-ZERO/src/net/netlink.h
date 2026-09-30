@@ -17,7 +17,8 @@ int  netlink_connect_telnet(const char *host, int port);
 // Run the system `ssh` client to `dest` (host or user@host) over a PTY; the
 // master fd becomes the host link (raw bytes). Returns 0 on success, -1 on
 // failure to spawn. Password/host-key prompts appear in the terminal as usual.
-int  netlink_connect_ssh(const char *dest);
+// port 22 (or <= 0) passes no -p, so a Port set in ~/.ssh/config still applies.
+int  netlink_connect_ssh(const char *dest, int port);
 
 // Run a local login shell on the Pi over a PTY (for using the Pi OS directly).
 // Returns 0 on success, -1 on failure.

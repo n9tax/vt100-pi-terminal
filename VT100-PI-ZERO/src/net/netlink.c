@@ -181,7 +181,7 @@ static int spawn_pty(char *const argv[]) {
     return 0;
 }
 
-int netlink_connect_ssh(const char *dest) {
+int netlink_connect_ssh(const char *dest, int port) {
     netlink_close();
     if (!dest || !dest[0]) return -1;
     // ServerAlive* makes ssh give up (and exit, hanging up the PTY) on a host
@@ -190,13 +190,21 @@ int netlink_connect_ssh(const char *dest) {
     char alive_int[48], alive_cnt[48];
     snprintf(alive_int, sizeof alive_int, "ServerAliveInterval=%d", SSH_ALIVE_INTERVAL_S);
     snprintf(alive_cnt, sizeof alive_cnt, "ServerAliveCountMax=%d", SSH_ALIVE_COUNT_MAX);
-    char *argv[] = { "ssh",
-                     "-o", "StrictHostKeyChecking=accept-new",
-                     "-o", alive_int,
-                     "-o", alive_cnt,
-                     (char *)dest, NULL };
+    // -p only for a non-default port: passing -p 22 would override a Port the
+    // user set for this host alias in ~/.ssh/config.
+    char portstr[16];
+    snprintf(portstr, sizeof portstr, "%d", port);
+    char *argv[12];
+    int a = 0;
+    argv[a++] = "ssh";
+    argv[a++] = "-o"; argv[a++] = "StrictHostKeyChecking=accept-new";
+    argv[a++] = "-o"; argv[a++] = alive_int;
+    argv[a++] = "-o"; argv[a++] = alive_cnt;
+    if (port > 0 && port != 22) { argv[a++] = "-p"; argv[a++] = portstr; }
+    argv[a++] = (char *)dest;
+    argv[a] = NULL;
     if (spawn_pty(argv) != 0) return -1;
-    fprintf(stderr, "netlink: ssh %s (pid %d)\n", dest, (int)child_pid);
+    fprintf(stderr, "netlink: ssh %s port %s (pid %d)\n", dest, portstr, (int)child_pid);
     return 0;
 }
 
