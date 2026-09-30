@@ -1,0 +1,14 @@
+[Unit]
+Description=Check GitHub for VT100-PI-ZERO updates
+
+# Check only -- nothing installs on its own. The result shows in Setup
+# (Ctrl+F3 -> Updates) and on the boot splash.
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1d
+RandomizedDelaySec=10min
+Unit=vt100-pi-update@check.service
+
+[Install]
+WantedBy=timers.target

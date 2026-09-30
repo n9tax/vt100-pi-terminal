@@ -27,6 +27,7 @@
 #include "io/kbd_evdev.h"
 #include "io/host_link.h"
 #include "net/hostconn.h"
+#include "update.h"
 #include "terminal/screen.h"
 #include "terminal/vt100.h"
 
@@ -52,6 +53,14 @@ static void splash_draw(void) {
     tm_cells[r0 + 1][c0 + w - 1] = (cell_t){ 0xB3, 7, 0, 0 };
     for (int i = 0; msg[i]; ++i)
         tm_cells[r0 + 1][c0 + 2 + i] = (cell_t){ (uint8_t)msg[i], 7, 0, 0 };
+
+    // The daily check only reports; this is where a waiting update gets seen.
+    if (update_available()) {
+        const char *note = "Update available -- Ctrl+F3, then Updates";
+        int nc = (TERM_COLS - (int)strlen(note)) / 2;
+        for (int i = 0; note[i]; ++i)
+            tm_cells[r0 + 4][nc + i] = (cell_t){ (uint8_t)note[i], 7, 0, 0 };
+    }
 
     textmode_render_all();
 }

@@ -20,6 +20,7 @@ add_executable(vt100-pi-zero
         src/autospeed.c
         src/setup.c
         src/service.c
+        src/update.c
         src/terminal/vtparse.c
         src/terminal/screen.c
         src/terminal/vt100.c

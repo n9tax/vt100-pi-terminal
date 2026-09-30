@@ -6,7 +6,7 @@ name: Release
 # the workflow that produces the public, permanent downloads the READMEs point
 # people at.
 #
-#   git tag -a v0.1.0 -m "..." && git push origin v0.1.0 && git push github v0.1.0
+#   git tag -a v0.2.0 -m "..." && git push github v0.2.0
 #
 # Both builds must succeed before the release is created -- `needs` on the
 # publish job means a broken board build leaves no half-populated release

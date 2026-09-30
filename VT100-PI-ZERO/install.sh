@@ -10,6 +10,11 @@
 #   ./install.sh --no-enable  install and start, but don't start at boot
 #   ./install.sh --clean      wipe the build directory first
 #   ./install.sh --build-only build, install nothing (no root needed)
+#   ./install.sh --no-build   install the existing build (used by the updater)
+#
+# Also installs the updater (vt100-pi-update) and its daily check timer, which
+# only *reports* a newer commit on GitHub -- Setup (Ctrl+F3) -> Updates -> Enter
+# installs it. Updates come from this clone, so keep it where it is.
 #
 # Kiosk is the default: this is a hardware terminal, so getty@tty1 is masked and
 # the machine boots straight into it with no login console on the screen. Undo
@@ -27,8 +32,12 @@ BIN_SRC_NAME=vt100-pi-zero
 BIN_DST=/usr/local/bin/vt100-pi-zero
 FONT_DST=/usr/local/share/vt100-pi/fonts
 UNIT_DST=/etc/systemd/system/$SERVICE
+UPD_BIN=/usr/local/bin/vt100-pi-update
+UPD_CONF=/etc/vt100-pi/update.conf
+UPD_TIMER=vt100-pi-update-check.timer
+INSTALLED_REC=/var/lib/vt100-pi/installed-commit
 
-DO_DEPS=0 DO_KIOSK=1 DO_ENABLE=1 DO_CLEAN=0 BUILD_ONLY=0 ALLOW_ROOT=0
+DO_DEPS=0 DO_KIOSK=1 DO_ENABLE=1 DO_CLEAN=0 BUILD_ONLY=0 NO_BUILD=0 ALLOW_ROOT=0
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
@@ -49,6 +58,7 @@ while [ $# -gt 0 ]; do
         --no-enable)  DO_ENABLE=0 ;;
         --clean)      DO_CLEAN=1 ;;
         --build-only) BUILD_ONLY=1 ;;
+        --no-build)   NO_BUILD=1 ;;
         --allow-root) ALLOW_ROOT=1 ;;
         -h|--help)    usage ;;
         *)            die "unknown option '$1' (try --help)" ;;
@@ -75,31 +85,37 @@ if [ "$DO_DEPS" -eq 1 ]; then
     $SUDO apt-get install -y build-essential cmake libdrm-dev libfreetype-dev pkg-config
 fi
 
-say "Checking build dependencies"
-missing=""
-command -v cmake >/dev/null 2>&1 || missing="$missing cmake"
-command -v pkg-config >/dev/null 2>&1 || missing="$missing pkg-config"
-if command -v pkg-config >/dev/null 2>&1; then
-    pkg-config --exists libdrm    || missing="$missing libdrm-dev"
-    pkg-config --exists freetype2 || missing="$missing libfreetype-dev"
-fi
-if [ -n "$missing" ]; then
-    die "missing:$missing
+# --no-build: the updater already built this as the clone's owner, and is now
+# running as root only to install it.
+if [ "$NO_BUILD" -eq 1 ]; then
+    say "Installing the existing build (--no-build)"
+else
+    say "Checking build dependencies"
+    missing=""
+    command -v cmake >/dev/null 2>&1 || missing="$missing cmake"
+    command -v pkg-config >/dev/null 2>&1 || missing="$missing pkg-config"
+    if command -v pkg-config >/dev/null 2>&1; then
+        pkg-config --exists libdrm    || missing="$missing libdrm-dev"
+        pkg-config --exists freetype2 || missing="$missing libfreetype-dev"
+    fi
+    if [ -n "$missing" ]; then
+        die "missing:$missing
        Re-run with --deps to install them, or:
        sudo apt install build-essential cmake libdrm-dev libfreetype-dev pkg-config"
-fi
-info "all present"
+    fi
+    info "all present"
 
-# ---- build ----------------------------------------------------------------
-# Before touching the running service, so a broken build costs nothing.
-if [ "$DO_CLEAN" -eq 1 ]; then
-    say "Removing $BUILD_DIR"
-    rm -rf "$BUILD_DIR"
-fi
+    # ---- build ------------------------------------------------------------
+    # Before touching the running service, so a broken build costs nothing.
+    if [ "$DO_CLEAN" -eq 1 ]; then
+        say "Removing $BUILD_DIR"
+        rm -rf "$BUILD_DIR"
+    fi
 
-say "Building"
-cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || echo 2)"
+    say "Building"
+    cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || echo 2)"
+fi
 
 BIN_SRC="$BUILD_DIR/$BIN_SRC_NAME"
 [ -x "$BIN_SRC" ] || die "build produced no $BIN_SRC"
@@ -141,7 +157,30 @@ fi
 
 $SUDO install -Dm644 "$SCRIPT_DIR/systemd/$SERVICE" "$UNIT_DST"
 info "$UNIT_DST"
+
+# ---- updater --------------------------------------------------------------
+# Only from a git clone: that clone is where updates are pulled and built.
+# safe.directory because under the updater this runs as root in a tree owned
+# by someone else, which git otherwise refuses to read.
+git_() { git -c safe.directory='*' -C "$SCRIPT_DIR" "$@"; }
+REPO_ROOT=$(git_ rev-parse --show-toplevel 2>/dev/null || true)
+if [ -n "$REPO_ROOT" ]; then
+    $SUDO install -Dm755 "$SCRIPT_DIR/update.sh" "$UPD_BIN"
+    info "$UPD_BIN"
+    $SUDO install -Dm644 "$SCRIPT_DIR/systemd/vt100-pi-update@.service" \
+        "/etc/systemd/system/vt100-pi-update@.service"
+    $SUDO install -Dm644 "$SCRIPT_DIR/systemd/$UPD_TIMER" "/etc/systemd/system/$UPD_TIMER"
+    printf 'REPO=%q\nOWNER=%q\n' "$REPO_ROOT" "$(stat -c %U "$REPO_ROOT")" \
+        | $SUDO install -Dm644 /dev/stdin "$UPD_CONF"
+    info "$UPD_CONF (updates from $REPO_ROOT)"
+fi
 $SUDO systemctl daemon-reload
+if [ -n "$REPO_ROOT" ]; then
+    $SUDO systemctl enable --now "$UPD_TIMER" >/dev/null 2>&1 \
+        && info "daily update check enabled ($UPD_TIMER)"
+else
+    info "not a git clone -- updater not installed"
+fi
 
 # ---- kiosk ----------------------------------------------------------------
 # Masked, not just disabled: logind can spawn an autovt getty on demand, which
@@ -208,6 +247,11 @@ sleep 1
 
 if systemctl is-active --quiet "$SERVICE"; then
     say "Running"
+    # What is installed, so the update check can compare against it rather
+    # than against whatever the clone was last pulled to.
+    if [ -n "$REPO_ROOT" ]; then
+        git_ rev-parse HEAD | $SUDO install -Dm644 /dev/stdin "$INSTALLED_REC"
+    fi
     systemctl --no-pager --lines=0 status "$SERVICE" || true
 else
     printf '\n\033[1;31mservice did not come up.\033[0m Recent log:\n\n'
@@ -223,5 +267,5 @@ Done.
              is root's config -- not \$HOME/.config -- and Ctrl+F3 writes there)
   Logs       journalctl -u $SERVICE -f
   Restart    sudo systemctl restart $SERVICE
-  Update     git pull && ./install.sh
+  Update     Setup (Ctrl+F3) -> Updates -> Enter, or: git pull && ./install.sh
 EOF

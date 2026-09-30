@@ -1,0 +1,17 @@
+[Unit]
+Description=VT100-PI-ZERO updater (%i)
+Documentation=file:/usr/local/bin/vt100-pi-update
+After=network-online.target
+Wants=network-online.target
+
+# Run as its own unit, not as a child of vt100-pi.service: `apply` restarts
+# vt100-pi.service, and stopping a unit kills every process in it. The terminal
+# starts vt100-pi-update@apply from Setup; the timer starts @check.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vt100-pi-update %i
+# A rebuild on the Zero 2 W takes a minute or two; leave plenty of headroom.
+TimeoutStartSec=30min
+# Keep the terminal responsive while the compiler runs.
+Nice=10

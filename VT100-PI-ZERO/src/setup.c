@@ -13,6 +13,7 @@
 #include "flow.h"
 #include "autospeed.h"
 #include "service.h"
+#include "update.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -24,7 +25,7 @@
 
 enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_SPORT, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
        F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_AUTOSPD,
-       F_AVG, F_DEPTH, F_DUMP, F_FONT, F_BOOT, NFIELDS };
+       F_AVG, F_DEPTH, F_DUMP, F_FONT, F_BOOT, F_UPDATE, NFIELDS };
 
 // Layout: title, address, buffer line, the field list, one help line on the
 // last row. There are more fields than rows now, so the list scrolls to keep the
@@ -43,8 +44,8 @@ static int is_text_field(int i) {
 }
 
 // Action rows do something when Enter lands on them, instead of the usual
-// save-and-close. Currently just the manual reconnect.
-static int is_action_field(int i) { return i == F_LINK; }
+// save-and-close: the manual reconnect, and the update check/install.
+static int is_action_field(int i) { return i == F_LINK || i == F_UPDATE; }
 
 
 static int active;
@@ -113,6 +114,7 @@ static void field_value(int i, char *out, size_t n) {
         case F_TPORT:  snprintf(out, n, "%d", work.telnet_port); break;
         case F_AUTOREC: snprintf(out, n, "%s", work.auto_reconnect ? "on" : "off"); break;
         case F_LINK:   snprintf(out, n, "%s", hostconn_status()); break;
+        case F_UPDATE: update_describe(out, n); break;
         case F_DEPTH:  snprintf(out, n, "%d line%s in flight",
                                 work.scroll_depth, work.scroll_depth == 1 ? "" : "s"); break;
         case F_DUMP:   snprintf(out, n, "%d lines", work.scroll_dump); break;
@@ -148,7 +150,7 @@ static void draw(void) {
         "Telnet port", "Auto reconnect", "Host link", "Theme", "Custom FG",
         "Custom BG", "Cursor", "Local echo", "Smooth scroll", "Scroll speed",
         "Auto speed", "Speed averaging", "Scroll depth", "Overrun limit", "Font",
-        "Start at boot",
+        "Start at boot", "Updates",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
@@ -191,7 +193,13 @@ static void draw(void) {
         put(ROW_FIELD0 + FIELD_ROWS - 1, 2, "\x19", 7, 0, 0);      // down arrow
 
     const char *help;
-    if (is_action_field(sel))
+    char uhelp[TERM_COLS + 1];
+    if (sel == F_UPDATE && update_available()) {
+        snprintf(uhelp, sizeof uhelp, "New: %s", update_subject());
+        help = uhelp;
+    } else if (sel == F_UPDATE)
+        help = "Enter: check GitHub for updates               Ctrl+F3: cancel";
+    else if (is_action_field(sel))
         help = "Enter: reconnect now                          Ctrl+F3: cancel";
     else if (sel == F_SPEED || sel == F_DEPTH || sel == F_DUMP || sel == F_AUTOSPD
              || sel == F_AVG)
@@ -235,7 +243,8 @@ static void change(int d) {
             work.speed_avg_ms = v;
             break;
         }
-        case F_LINK:   break;   // an action row: Enter drives it, not Left/Right
+        case F_LINK:   break;   // action rows: Enter drives them, not Left/Right
+        case F_UPDATE: break;
         case F_BOOT:   boot_flag ^= 1; break;
         case F_THEME:  { int nt = themes_count(); work.theme = (work.theme + d + nt) % nt; break; }
         case F_CURSOR: work.cursor_style ^= 1; break;
@@ -408,6 +417,14 @@ void setup_feed(uint8_t b) {
         esc = 0;                             // stray ESC; fall through
     }
     if (b == 0x1b) { esc = 1; return; }
+    if ((b == '\r' || b == '\n') && sel == F_UPDATE) {
+        // Stays open: the row shows the check (or the build) as it runs, and an
+        // install restarts the terminal anyway. Edits made so far are kept in
+        // the menu, not saved.
+        update_start();
+        draw();
+        return;
+    }
     if (b == '\r' || b == '\n') { do_save(is_action_field(sel)); return; }
     if (b == '\t') { move_sel(+1); draw(); return; }
     if ((b == 'r' || b == 'R') && !is_text_field(sel)) {   // reset the flow counters

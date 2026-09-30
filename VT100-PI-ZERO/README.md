@@ -273,6 +273,7 @@ sudo systemctl unmask --now getty@tty1.service
 | `--no-enable` | install and start, but don't start at boot |
 | `--clean` | wipe the build directory first |
 | `--build-only` | build and install nothing (no root needed) |
+| `--no-build` | install the existing build without rebuilding (the updater uses this) |
 
 <details><summary>Equivalent manual steps</summary>
 
@@ -291,6 +292,40 @@ sudo systemctl enable --now vt100-pi.service
 
 Note the service runs as `root`, so the settings file it reads is
 `/root/.config/vt100-pi/vt100.conf` — not the one under your own `$HOME`.
+
+### Updating from GitHub
+
+`install.sh` also installs an updater that follows `main` in the clone you ran
+it from, so keep that clone where it is. Once a day (and 3 minutes after boot)
+a timer fetches from GitHub and records whether any commits touching
+`VT100-PI-ZERO/` are waiting. **It only reports; it never installs on its own.**
+A waiting update shows up in two places:
+
+- the boot splash, under the `VT100 OK` box
+- **Setup (Ctrl+F3) -> Updates**, at the bottom of the list, which reads e.g.
+  `3 new (7f9c413) -- Enter to install`; the help line shows the newest commit
+
+Enter on **Updates** runs a check right away. When an update is waiting, Enter
+installs it instead: it pulls, builds as the clone's owner (a minute or two on
+the Zero 2 W; the row shows progress), installs, and restarts the terminal. That
+restart drops any live ssh/telnet session. The kiosk and start-at-boot choices
+the box has are kept. A failed build leaves the running terminal alone, and a
+new binary that won't stay up is rolled back to the previous one.
+
+From a shell, the same thing:
+
+```
+sudo vt100-pi-update check          # or: apply
+journalctl -u 'vt100-pi-update@*'   # what it did
+```
+
+The status it reports is in `/var/lib/vt100-pi/update.status`. The fetch must
+work without a prompt: a clone over `https://` of this public repo does. An
+ssh clone needs a key with no passphrase for the clone's owner, or it reports
+`fetch failed`. Uncommitted edits in the clone make the pull fail. Stash or
+discard them.
+
+### Boot time
 
 This is the closest Linux equivalent to the Pico build's instant-boot-to-
 terminal behavior. Actual boot time is still Raspberry Pi OS's normal
