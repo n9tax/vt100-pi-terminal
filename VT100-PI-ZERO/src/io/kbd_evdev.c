@@ -15,6 +15,8 @@
 
 static int shift_down, ctrl_down, alt_down, caps_lock;
 static int setup_toggle_flag;   // set on Ctrl+F3, consumed by the main loop
+static int break_flag;          // set on Pause/Break, consumed by the main loop
+static int no_scroll;           // NO SCROLL (Scroll Lock) state: 1 = XOFF sent
 
 // Every open typing node. A composite keyboard contributes more than one.
 static struct { int fd; char path[512]; } devs[KBD_MAX_DEVS];
@@ -211,6 +213,35 @@ void kbd_hotplug_settle(void) {
 int kbd_fd_count(void) { return ndevs; }
 int kbd_fd_at(int i) { return (i >= 0 && i < ndevs) ? devs[i].fd : -1; }
 
+int kbd_take_break(void) { int b = break_flag; break_flag = 0; return b; }
+
+// VT100 PF1-PF4: SS3 P..S in ANSI mode, ESC P..S in VT52 mode.
+static void emit_pf(char k) {
+    push(0x1b);
+    if (!vt100_vt52_mode()) push('O');
+    push((uint8_t)k);
+}
+
+// A VT100 keypad key. Numeric mode sends what is printed on the key; keypad
+// application mode sends SS3 + a letter (ESC ? + letter in VT52 mode).
+static void emit_keypad(char numeric, char app) {
+    if (!vt100_keypad_app()) {
+        push((uint8_t)numeric);
+        if (numeric == '\r' && vt100_newline_mode()) push('\n');
+        return;
+    }
+    push(0x1b);
+    push(vt100_vt52_mode() ? '?' : 'O');
+    push((uint8_t)app);
+}
+
+// Arrow keys: ESC A..D in VT52 mode, else per DECCKM.
+static void emit_arrow(char k) {
+    push(0x1b);
+    if (!vt100_vt52_mode()) push(vt100_cursor_keys_app() ? 'O' : '[');
+    push((uint8_t)k);
+}
+
 int kbd_take_setup_toggle(void) {
     int t = setup_toggle_flag;
     setup_toggle_flag = 0;
@@ -270,10 +301,36 @@ static void emit_key(unsigned code) {
         case KEY_CAPSLOCK:   caps_lock = !caps_lock; return;
 
         // Arrows honour DECCKM (application cursor keys).
-        case KEY_RIGHT: emit(vt100_cursor_keys_app() ? "\x1bOC" : "\x1b[C"); return;
-        case KEY_LEFT:  emit(vt100_cursor_keys_app() ? "\x1bOD" : "\x1b[D"); return;
-        case KEY_DOWN:  emit(vt100_cursor_keys_app() ? "\x1bOB" : "\x1b[B"); return;
-        case KEY_UP:    emit(vt100_cursor_keys_app() ? "\x1bOA" : "\x1b[A"); return;
+        case KEY_RIGHT: emit_arrow('C'); return;
+        case KEY_LEFT:  emit_arrow('D'); return;
+        case KEY_DOWN:  emit_arrow('B'); return;
+        case KEY_UP:    emit_arrow('A'); return;
+
+        // The VT100 keypad on a PC one. Its top row (NumLock / *) is PF1-PF3
+        // (F1-F4 are PF1-PF4 too); '-' stays '-', and '+' is the VT100's ','
+        // key, which sits in the same place. NumLock state is ignored.
+        case KEY_NUMLOCK:    emit_pf('P'); return;
+        case KEY_KPSLASH:    emit_pf('Q'); return;
+        case KEY_KPASTERISK: emit_pf('R'); return;
+        case KEY_KP0: emit_keypad('0', 'p'); return;
+        case KEY_KP1: emit_keypad('1', 'q'); return;
+        case KEY_KP2: emit_keypad('2', 'r'); return;
+        case KEY_KP3: emit_keypad('3', 's'); return;
+        case KEY_KP4: emit_keypad('4', 't'); return;
+        case KEY_KP5: emit_keypad('5', 'u'); return;
+        case KEY_KP6: emit_keypad('6', 'v'); return;
+        case KEY_KP7: emit_keypad('7', 'w'); return;
+        case KEY_KP8: emit_keypad('8', 'x'); return;
+        case KEY_KP9: emit_keypad('9', 'y'); return;
+        case KEY_KPMINUS: emit_keypad('-', 'm'); return;
+        case KEY_KPPLUS:  emit_keypad(',', 'l'); return;
+        case KEY_KPDOT:   emit_keypad('.', 'n'); return;
+        case KEY_KPENTER: emit_keypad('\r', 'M'); return;
+
+        // NO SCROLL: alternately XOFF and XON, as the VT100 key does.
+        case KEY_SCROLLLOCK: no_scroll ^= 1; push(no_scroll ? 0x13 : 0x11); return;
+        // BREAK: a line break on the serial port (the main loop sends it).
+        case KEY_PAUSE: break_flag = 1; return;
 
         case KEY_INSERT:   emit("\x1b[2~"); return;
         case KEY_HOME:     emit("\x1b[H");  return;
@@ -282,10 +339,10 @@ static void emit_key(unsigned code) {
         case KEY_END:      emit("\x1b[F");  return;
         case KEY_PAGEDOWN: emit("\x1b[6~"); return;
 
-        case KEY_F1:  emit("\x1bOP");   return;
-        case KEY_F2:  emit("\x1bOQ");   return;
-        case KEY_F3:  emit("\x1bOR");   return;
-        case KEY_F4:  emit("\x1bOS");   return;
+        case KEY_F1:  emit_pf('P'); return;
+        case KEY_F2:  emit_pf('Q'); return;
+        case KEY_F3:  emit_pf('R'); return;
+        case KEY_F4:  emit_pf('S'); return;
         case KEY_F5:  emit("\x1b[15~"); return;
         case KEY_F6:  emit("\x1b[17~"); return;
         case KEY_F7:  emit("\x1b[18~"); return;

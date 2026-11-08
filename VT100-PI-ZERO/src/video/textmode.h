@@ -15,6 +15,15 @@
 #define ATTR_UNDERLINE 0x02u   // underline on the second-to-last glyph row
 #define ATTR_BLINK     0x04u   // toggled invisible during the blink phase
 #define ATTR_REVERSE   0x08u   // swap fg/bg
+#define ATTR_DECG      0x10u   // glyph is a DEC Special Graphics char (0x5F-0x7E),
+                               // drawn from its own atlas slots, not CP437
+
+// Per-row line size (DECSWL / DECDWL / DECDHL). A double-width or double-height
+// row shows only the first TERM_COLS/2 cells, each drawn two cells wide.
+#define LINE_SINGLE 0
+#define LINE_DW     1   // ESC # 6
+#define LINE_DH_TOP 2   // ESC # 3: top half of double-height (and double-width)
+#define LINE_DH_BOT 3   // ESC # 4: bottom half
 
 typedef struct {
     uint8_t glyph;   // index into font_8x16 (CP437)
@@ -25,6 +34,10 @@ typedef struct {
 
 // The live cell grid (row-major). The screen model writes here.
 extern cell_t tm_cells[TERM_ROWS][TERM_COLS];
+
+// Line size of each row (LINE_*). The screen model moves these with their rows.
+// Ignored while the Setup menu's chrome is up, so the menu always draws single.
+extern uint8_t tm_line[TERM_ROWS];
 
 // Open the DRM device, pick the connected display's preferred mode, allocate
 // and map a framebuffer, and blank the grid. Exits the process on failure

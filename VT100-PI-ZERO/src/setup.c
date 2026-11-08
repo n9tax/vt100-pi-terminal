@@ -23,7 +23,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-enum { F_SHELL, F_SERIAL, F_BAUD, F_SSH, F_SPORT, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
+enum { F_SHELL, F_SERIAL, F_BAUD, F_FORMAT, F_XON, F_SSH, F_SPORT, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
        F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_AUTOSPD,
        F_AVG, F_DEPTH, F_DUMP, F_FONT, F_BOOT, F_UPDATE, NFIELDS };
 
@@ -106,6 +106,8 @@ static void field_value(int i, char *out, size_t n) {
                 snprintf(out, n, "%s", work.serial_dev);
             break;
         case F_BAUD:   snprintf(out, n, "%d", work.baud); break;
+        case F_FORMAT: snprintf(out, n, "%s", settings_serial_format_name(work.serial_format)); break;
+        case F_XON:    snprintf(out, n, "%s", work.xon_xoff ? "on" : "off"); break;
         case F_SSH:    snprintf(out, n, "%s", work.ssh_host); break;
         case F_SPORT:  if (work.ssh_port > 0) snprintf(out, n, "%d", work.ssh_port);
                        else out[0] = '\0';   // cleared mid-edit; saves as 22
@@ -146,7 +148,7 @@ static void field_value(int i, char *out, size_t n) {
 
 static void draw(void) {
     static const char *labels[NFIELDS] = {
-        "Local shell", "Serial device", "Baud rate", "SSH host", "SSH port", "Telnet host",
+        "Local shell", "Serial device", "Baud rate", "Serial format", "XON/XOFF", "SSH host", "SSH port", "Telnet host",
         "Telnet port", "Auto reconnect", "Host link", "Theme", "Custom FG",
         "Custom BG", "Cursor", "Local echo", "Smooth scroll", "Scroll speed",
         "Auto speed", "Speed averaging", "Scroll depth", "Overrun limit", "Font",
@@ -233,6 +235,10 @@ static void change(int d) {
             work.telnet_port = tports[idx];
             break;
         }
+        case F_FORMAT:
+            work.serial_format = (work.serial_format + d + SERIAL_FMT_COUNT) % SERIAL_FMT_COUNT;
+            break;
+        case F_XON:    work.xon_xoff ^= 1; break;
         case F_SHELL:  work.local_shell ^= 1; break;
         case F_AUTOREC: work.auto_reconnect ^= 1; break;
         case F_AUTOSPD: work.auto_speed ^= 1; break;
@@ -342,8 +348,9 @@ static void do_save(int force_reconnect) {
     // serial device that was missing at boot can only be reopened by editing the
     // path and editing it back -- the same trap the host link used to have.
     if (strcmp(work.serial_dev, orig.serial_dev) != 0 || work.baud != orig.baud
+        || work.serial_format != orig.serial_format
         || !serial_connected())
-        serial_reconfigure(work.serial_dev, work.baud);
+        serial_reconfigure(work.serial_dev, work.baud, work.serial_format);
     if (strcmp(work.font_path, orig.font_path) != 0)
         textmode_reload_font();
 

@@ -70,6 +70,8 @@ cursor style, local echo, or the font — no rebuild:
 ```
 serial_dev = /dev/serial0
 baud       = 9600        # 300 1200 2400 4800 9600 19200 38400 57600 115200
+format     = 8N1         # 8N1 7E1 7O1 7M1 7S1 -- match the host's frame format
+xon_xoff   = on          # send XOFF/XON when the input buffer fills
 theme      = amber       # color amber green white blue red yellow c64 vic20 c128 borland custom
 cursor     = block       # block | underline
 local_echo = off         # on | off
@@ -236,6 +238,48 @@ applies, **Ctrl+F3** again cancels. Theme/cursor/echo apply instantly; a changed
 serial device/baud reopens the link and a changed font rebuilds the glyph atlas
 live — no restart. On the **Host link** row **Enter** reconnects instead of
 saving (see "When the session drops" above).
+
+### VT100 fidelity
+
+The emulation follows the DEC VT100 (with the Advanced Video Option), so old
+host software and `.vt` animations behave as they did on the real terminal:
+
+- **Double-width and double-height lines** (`ESC #3`/`#4`/`#6`, back with
+  `ESC #5`). Such a line holds 40 characters; making a line wide drops its right
+  half, and erasing the whole screen (ED) returns lines to single width.
+- **DEC Special Graphics** with the VT100's own glyphs, including scan lines
+  1/3/5/7/9 (`o p q r s`), the checkerboard, and the small two-letter control
+  pictures (HT, FF, CR, LF, NL, VT). The UK set (`ESC ( A`, `#` = £) too.
+- **VT52 mode** (`ESC [ ? 2 l`, back with `ESC <`): `ESC A`-`D`, `H`, `I`, `J`,
+  `K`, `Y` row col, `F`/`G` graphics, `Z` identify. The keyboard follows it.
+- **DECSCLM** (`ESC [ ? 4 h`/`l`) switches smooth/jump scroll from the host, as
+  the VT100 does. The Smooth scroll setting is what RIS and Setup restore.
+- **DECCOLM** (`ESC [ ? 3 h`/`l`) clears the screen and resets the margins.
+  The grid stays 80 columns: 132-column mode is not emulated.
+- **DECALN** (`ESC # 8`), **DECID** (`ESC Z`), **DECREQTPARM** (`ESC [ x`,
+  reports the baud and format below).
+- DEL is ignored, and SUB cancels a sequence and shows the checkerboard.
+- **Serial format** (Setup row, `format`): 8N1, or 7 data bits with even, odd,
+  mark or space parity. With 7 bits the eighth bit is ignored, as on a VT100,
+  so a host sending parity no longer shows up as stray graphics characters.
+  Received parity is not checked.
+- **XON/XOFF** (Setup row, `xon_xoff`): XOFF at three-quarters of the 64 KB
+  input buffer, XON at a quarter. This only fires on a deep backlog, or with
+  Setup open on a busy host (serial keeps being read while the menu is up).
+  It needs a host that honors ^S/^Q (RT-11: `SET TT PAGE`; Linux: `ixon`).
+
+The keyboard maps the VT100's keys onto a PC one:
+
+| VT100 | PC |
+|---|---|
+| PF1 PF2 PF3 PF4 | F1 F2 F3 F4, and Num Lock / `/` / `*` for PF1-PF3 |
+| keypad 0-9 `.` `-` Enter | keypad 0-9 `.` `-` Enter |
+| keypad `,` | keypad `+` (same position) |
+| NO SCROLL | Scroll Lock (sends XOFF, then XON) |
+| BREAK | Pause/Break (serial only) |
+
+The keypad sends digits in numeric mode and `ESC O p`... in application mode
+(`ESC =`), as editors like KED and EDT expect. Num Lock state is ignored.
 
 ## Boot straight into the terminal (kiosk mode)
 

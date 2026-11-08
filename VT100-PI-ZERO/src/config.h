@@ -21,6 +21,12 @@
 // ---- Serial (RS232 host link) ---------------------------------------------
 #define SERIAL_DEV   "/dev/serial0"
 #define SERIAL_BAUD  9600
+// Frame format (SERIAL_FMT_* in settings.h): 8N1, or 7 data bits with even,
+// odd, mark or space parity -- the VT100 Setup's "bits per char" and parity.
+#define SERIAL_FORMAT_DEFAULT 0   // 8N1
+// Send XOFF when the input ring fills and XON once it drains, as the VT100
+// does. Only ever fires on a deep backlog (or with Setup open on a busy host).
+#define XON_XOFF_DEFAULT      1
 
 // ---- Display theme ----------------------------------------------------------
 // The full theme list (color, amber/green/... phosphor, c64/vic20/c128/borland

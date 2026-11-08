@@ -1,4 +1,5 @@
 #include "io/serial_linux.h"
+#include "settings.h"
 
 #include <fcntl.h>
 #include <termios.h>
@@ -8,6 +9,7 @@
 #include <errno.h>
 
 static int fd = -1;
+static int cur_fmt = SERIAL_FMT_8N1;   // kept so a baud-only change keeps the format
 
 static speed_t baud_to_speed(int baud) {
     switch (baud) {
@@ -38,10 +40,18 @@ static int apply_termios(int baud) {
     cfsetispeed(&tio, sp);
     cfsetospeed(&tio, sp);
     tio.c_cflag |= (CLOCAL | CREAD);
-    tio.c_cflag &= ~PARENB;    // 8N1
-    tio.c_cflag &= ~CSTOPB;
-    tio.c_cflag &= ~CSIZE;
-    tio.c_cflag |= CS8;
+    tio.c_cflag &= ~(PARENB | PARODD | CMSPAR | CSTOPB | CSIZE);
+    switch (cur_fmt) {
+        case SERIAL_FMT_7E1: tio.c_cflag |= CS7 | PARENB; break;
+        case SERIAL_FMT_7O1: tio.c_cflag |= CS7 | PARENB | PARODD; break;
+        case SERIAL_FMT_7M1: tio.c_cflag |= CS7 | PARENB | CMSPAR | PARODD; break;
+        case SERIAL_FMT_7S1: tio.c_cflag |= CS7 | PARENB | CMSPAR; break;
+        default:             tio.c_cflag |= CS8; break;   // 8N1
+    }
+    // Parity is generated on send but not checked on receive: a VT100 shows a
+    // character with a parity error rather than dropping it. With CS7 the
+    // eighth bit never reaches us. XON/XOFF is done by main.c, not the driver.
+    tio.c_iflag &= ~(INPCK | IXON | IXOFF | IXANY);
     tio.c_cc[VMIN] = 0;
     tio.c_cc[VTIME] = 0;
     if (tcsetattr(fd, TCSANOW, &tio) != 0) {
@@ -57,7 +67,8 @@ static int apply_termios(int baud) {
 // configured, so the terminal had every reason to come up. Warn, run without
 // it, and let Setup (Ctrl+F3) point at a device that exists or switch to
 // ssh/telnet/local shell.
-int serial_init(const char *path, int baud) {
+int serial_init(const char *path, int baud, int fmt) {
+    cur_fmt = fmt;
     fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) {
         fprintf(stderr, "serial: open(%s) failed: %s\n", path, strerror(errno));
@@ -96,7 +107,9 @@ void serial_write(const uint8_t *buf, uint32_t len) {
 
 void serial_set_baud(int baud) { (void)apply_termios(baud); }
 
-int serial_reconfigure(const char *path, int baud) {
+void serial_send_break(void) { if (fd >= 0) tcsendbreak(fd, 0); }
+
+int serial_reconfigure(const char *path, int baud, int fmt) {
     // Open the new device before dropping the old one, so a bad path from the
     // Setup menu leaves the existing link intact rather than killing serial.
     int nf = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
@@ -106,6 +119,7 @@ int serial_reconfigure(const char *path, int baud) {
     }
     if (fd >= 0) close(fd);
     fd = nf;
+    cur_fmt = fmt;
     if (apply_termios(baud) != 0) { close(fd); fd = -1; return -1; }
     return 0;
 }

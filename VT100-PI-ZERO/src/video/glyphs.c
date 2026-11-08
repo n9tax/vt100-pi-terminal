@@ -17,7 +17,7 @@
 #define ASSET_FONT_PATH ""   // normally set by CMake to the bundled TTF
 #endif
 
-#define GLYPH_COUNT 256
+#define GLYPH_COUNT (GLYPH_DEC_BASE + GLYPH_DEC_COUNT)
 
 static int aw, ah;            // atlas cell size (pixels)
 static uint8_t *atlas;        // GLYPH_COUNT * aw * ah coverage bytes
@@ -130,6 +130,117 @@ static int render_special(int code, uint8_t *cell) {
     return 1;
 }
 
+// ---- DEC Special Graphics (the VT100's line-drawing set) --------------------
+// One slot per char 0x5F-0x7E. Box pieces reuse the procedural CP437 cell so
+// they join; the rest are drawn here or taken from the font by code point.
+enum { DG_FONT, DG_COPY, DG_SCAN, DG_CHECKER, DG_PICTURE };
+static const struct { uint8_t kind; uint16_t arg; const char *pic; } dec_gfx[GLYPH_DEC_COUNT] = {
+    { DG_FONT, 0x0020, NULL },  // _  blank
+    { DG_FONT, 0x25C6, NULL },  // `  diamond
+    { DG_CHECKER, 0, NULL },    // a  checkerboard
+    { DG_PICTURE, 0, "HT" },    // b
+    { DG_PICTURE, 0, "FF" },    // c
+    { DG_PICTURE, 0, "CR" },    // d
+    { DG_PICTURE, 0, "LF" },    // e
+    { DG_FONT, 0x00B0, NULL },  // f  degree
+    { DG_FONT, 0x00B1, NULL },  // g  plus/minus
+    { DG_PICTURE, 0, "NL" },    // h
+    { DG_PICTURE, 0, "VT" },    // i
+    { DG_COPY, 0xD9, NULL },    // j  lower-right corner
+    { DG_COPY, 0xBF, NULL },    // k  upper-right corner
+    { DG_COPY, 0xDA, NULL },    // l  upper-left corner
+    { DG_COPY, 0xC0, NULL },    // m  lower-left corner
+    { DG_COPY, 0xC5, NULL },    // n  crossing lines
+    { DG_SCAN, 1, NULL },       // o  scan line 1
+    { DG_SCAN, 3, NULL },       // p  scan line 3
+    { DG_COPY, 0xC4, NULL },    // q  scan line 5 = horizontal line
+    { DG_SCAN, 7, NULL },       // r  scan line 7
+    { DG_SCAN, 9, NULL },       // s  scan line 9
+    { DG_COPY, 0xC3, NULL },    // t  left tee
+    { DG_COPY, 0xB4, NULL },    // u  right tee
+    { DG_COPY, 0xC1, NULL },    // v  bottom tee
+    { DG_COPY, 0xC2, NULL },    // w  top tee
+    { DG_COPY, 0xB3, NULL },    // x  vertical bar
+    { DG_FONT, 0x2264, NULL },  // y  less-or-equal
+    { DG_FONT, 0x2265, NULL },  // z  greater-or-equal
+    { DG_FONT, 0x03C0, NULL },  // {  pi
+    { DG_FONT, 0x2260, NULL },  // |  not equal
+    { DG_FONT, 0x00A3, NULL },  // }  pound sterling
+    { DG_FONT, 0x00B7, NULL },  // ~  centred dot
+};
+
+// Draw the font's glyph for code point cp into cell at the face's current size,
+// on baseline y_base: centred by advance when ox_adj < 0, else starting at x =
+// ox_adj. Returns 0 if the font has no such glyph (the cell is left as is).
+static int render_cp(FT_Face face, uint32_t cp, uint8_t *cell, int ox_adj, int y_base) {
+    FT_UInt gi = FT_Get_Char_Index(face, cp);
+    if (gi == 0 || FT_Load_Glyph(face, gi, FT_LOAD_RENDER)) return 0;
+    FT_GlyphSlot g = face->glyph;
+    FT_Bitmap *bm = &g->bitmap;
+    int adv = (int)(g->advance.x >> 6);
+    int ox = ox_adj < 0 ? (aw - adv) / 2 + g->bitmap_left : ox_adj + g->bitmap_left;
+    int oy = y_base - g->bitmap_top;
+    for (unsigned by = 0; by < bm->rows; ++by) {
+        int py = oy + (int)by;
+        if (py < 0 || py >= ah) continue;
+        const unsigned char *srow = bm->buffer + (int)by * bm->pitch;
+        for (unsigned bx = 0; bx < bm->width; ++bx) {
+            int px = ox + (int)bx;
+            if (px < 0 || px >= aw) continue;
+            if (srow[bx] > cell[py * aw + px]) cell[py * aw + px] = srow[bx];
+        }
+    }
+    return 1;
+}
+
+// The DEC slots. Runs after the CP437 pass (DG_COPY reads those cells) and
+// leaves the face at half size for the control pictures, so call it last.
+static void build_dec(FT_Face face, int em_w, int em_h) {
+    int th = ah / 12; if (th < 2) th = 2;   // same stroke as the box glyphs
+    int asc = (int)(face->size->metrics.ascender >> 6);
+    int full = asc - (int)(face->size->metrics.descender >> 6);
+    int y_base = asc + (ah - full) / 2;
+    for (int i = 0; i < GLYPH_DEC_COUNT; ++i) {
+        uint8_t *cell = atlas + (size_t)(GLYPH_DEC_BASE + i) * aw * ah;
+        switch (dec_gfx[i].kind) {
+            case DG_FONT:
+                render_cp(face, dec_gfx[i].arg, cell, -1, y_base);
+                break;
+            case DG_COPY:
+                memcpy(cell, atlas + (size_t)dec_gfx[i].arg * aw * ah, (size_t)aw * ah);
+                break;
+            case DG_SCAN: {
+                // The VT100 cell is 10 scan lines; scan line n sits n/10 of the
+                // way down, so 5 lands on the box-drawing centre line.
+                int cy = ah * dec_gfx[i].arg / 10;
+                fill_rect(cell, 0, cy - th / 2, aw, cy - th / 2 + th, 255);
+                break;
+            }
+            case DG_CHECKER: {
+                // A coarse dot pattern like the VT100's, not a flat 50% grey.
+                int bw = aw / 8 > 0 ? aw / 8 : 1, bh = ah / 10 > 0 ? ah / 10 : 1;
+                for (int y = 0; y < ah; ++y)
+                    for (int x = 0; x < aw; ++x)
+                        cell[y * aw + x] = (((x / bw) + (y / bh)) & 1) ? 255 : 0;
+                break;
+            }
+            default: break;   // pictures: second pass below, at half size
+        }
+    }
+
+    // Control pictures: the two letters small and stepped diagonally, the way
+    // the VT100 draws them (upper-left letter, lower-right letter).
+    FT_Set_Pixel_Sizes(face, (FT_UInt)(em_w / 2 > 0 ? em_w / 2 : 1),
+                             (FT_UInt)(em_h / 2 > 0 ? em_h / 2 : 1));
+    int hasc = (int)(face->size->metrics.ascender >> 6);
+    for (int i = 0; i < GLYPH_DEC_COUNT; ++i) {
+        if (dec_gfx[i].kind != DG_PICTURE) continue;
+        uint8_t *cell = atlas + (size_t)(GLYPH_DEC_BASE + i) * aw * ah;
+        render_cp(face, (uint8_t)dec_gfx[i].pic[0], cell, 0, hasc);
+        render_cp(face, (uint8_t)dec_gfx[i].pic[1], cell, aw / 2, ah / 2 + hasc);
+    }
+}
+
 // ---- font discovery --------------------------------------------------------
 static const char *find_font(void) {
     // The registry resolves "" (default), a bundled name, or an absolute path.
@@ -205,39 +316,22 @@ void glyphs_init(int cell_w, int cell_h) {
     int full = asc - desc;
     int y_base = asc + (ah - full) / 2;    // baseline, centred with any leftover slack
 
-    for (int code = 0; code < GLYPH_COUNT; ++code) {
+    for (int code = 0; code < 256; ++code) {
         uint8_t *cell = atlas + (size_t)code * aw * ah;
 
         // Block/shade/box-drawing region: draw procedurally so it tiles.
         if (render_special(code, cell)) continue;
-
-        FT_UInt gi = FT_Get_Char_Index(face, cp437[code]);
-        if (gi == 0) continue;                        // no glyph -> leave blank
-        if (FT_Load_Glyph(face, gi, FT_LOAD_RENDER)) continue;
-
-        FT_GlyphSlot g = face->glyph;
-        FT_Bitmap *bm = &g->bitmap;
-
-        int adv = (int)(g->advance.x >> 6);
-        int ox = (aw - adv) / 2 + g->bitmap_left;     // centre by advance width
-        int oy = y_base - g->bitmap_top;
-
-        for (unsigned by = 0; by < bm->rows; ++by) {
-            int py = oy + (int)by;
-            if (py < 0 || py >= ah) continue;
-            const unsigned char *srow = bm->buffer + (int)by * bm->pitch;
-            for (unsigned bx = 0; bx < bm->width; ++bx) {
-                int px = ox + (int)bx;
-                if (px < 0 || px >= aw) continue;
-                cell[py * aw + px] = srow[bx];
-            }
-        }
+        render_cp(face, cp437[code], cell, -1, y_base);   // centred by advance
     }
+    build_dec(face, em_w, em_h);
 
     FT_Done_Face(face);
     FT_Done_FreeType(lib);
 }
 
-const uint8_t *glyph_alpha(uint8_t code) { return atlas + (size_t)code * aw * ah; }
+const uint8_t *glyph_alpha(int code) {
+    if (code < 0 || code >= GLYPH_COUNT) code = ' ';
+    return atlas + (size_t)code * aw * ah;
+}
 int glyph_atlas_w(void) { return aw; }
 int glyph_atlas_h(void) { return ah; }

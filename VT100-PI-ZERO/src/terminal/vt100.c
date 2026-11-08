@@ -3,6 +3,7 @@
 #include "terminal/screen.h"
 #include "video/textmode.h"
 #include "io/host_link.h"
+#include "settings.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,10 @@ static struct {
     int cursor_keys_app;   // DECCKM
     int keypad_app;        // DECKPAM/PNM
     int newline_mode;      // LNM
+    int vt52;              // DECANM reset: VT52 compatibility mode
+    int vt52_state;        // VT52 parser: 0 ground, 1 after ESC, 2/3 ESC Y row/col
+    int vt52_row;
+    int vt52_saved_g0;     // G0 before VT52 graphics mode (ESC F), for ESC G
 } vt;
 
 static int bell_pending = 0;
@@ -21,6 +26,7 @@ int vt100_take_bell(void) { int b = bell_pending; bell_pending = 0; return b; }
 int vt100_cursor_keys_app(void) { return vt.cursor_keys_app; }
 int vt100_keypad_app(void)      { return vt.keypad_app; }
 int vt100_newline_mode(void)    { return vt.newline_mode; }
+int vt100_vt52_mode(void)       { return vt.vt52; }
 
 // ---- helpers -------------------------------------------------------------
 static int pget(vtparse_t *p, int i, int def) {
@@ -92,6 +98,9 @@ static void do_mode(vtparse_t *p, int on) {
         if (p->prefix == '?') {
             switch (v) {
                 case 1:  vt.cursor_keys_app = on; break;   // DECCKM
+                case 2:  if (!on) { vt.vt52 = 1; vt.vt52_state = 0; } break;  // DECANM -> VT52
+                case 3:  screen_column_mode(); break;      // DECCOLM (80 cols either way)
+                case 4:  textmode_set_smooth(on, 0); break; // DECSCLM: smooth/jump scroll
                 case 5:  screen_set_reverse(on); break;    // DECSCNM
                 case 6:  screen_set_origin_mode(on); break; // DECOM
                 case 7:  screen_set_autowrap(on); break;   // DECAWM
@@ -120,6 +129,27 @@ static void do_dsr(vtparse_t *p) {
     } else if (req == 5) {
         respond("\x1b[0n");               // terminal OK
     }
+}
+
+// DECREQTPARM: report the line settings. sol 0 = reports may also be sent
+// unsolicited (reply 2), 1 = only on request (reply 3).
+static void do_decreqtparm(vtparse_t *p) {
+    int sol = pget(p, 0, 0);
+    if (sol > 1) return;
+    static const struct { int baud, code; } speeds[] = {
+        { 50, 0 }, { 75, 8 }, { 110, 16 }, { 134, 24 }, { 150, 32 }, { 200, 40 },
+        { 300, 48 }, { 600, 56 }, { 1200, 64 }, { 1800, 72 }, { 2000, 80 },
+        { 2400, 88 }, { 3600, 96 }, { 4800, 104 }, { 9600, 112 }, { 19200, 120 },
+    };
+    int code = 128;   // faster than any VT100 speed
+    for (unsigned i = 0; i < sizeof speeds / sizeof speeds[0]; ++i)
+        if (speeds[i].baud == g_settings.baud) { code = speeds[i].code; break; }
+    int f = g_settings.serial_format;
+    int par = f == SERIAL_FMT_7O1 ? 4 : f == SERIAL_FMT_7E1 ? 5 : 1;   // 1 = none
+    int bits = f == SERIAL_FMT_8N1 ? 1 : 2;                             // 1 = 8, 2 = 7
+    char buf[48];
+    snprintf(buf, sizeof buf, "\x1b[%d;%d;%d;%d;%d;1;0x", sol + 2, par, bits, code, code);
+    respond(buf);
 }
 
 // ---- CSI final dispatch --------------------------------------------------
@@ -163,6 +193,7 @@ static void do_csi(vtparse_t *p, uint8_t ch) {
         case 'c':                                   // DA
             if (p->prefix == 0 && pget(p, 0, 0) == 0) respond("\x1b[?1;2c");
             break;
+        case 'x': if (p->prefix == 0) do_decreqtparm(p); break;
         case 's': if (p->prefix == 0) screen_save_cursor(); break;
         case 'u': if (p->prefix == 0) screen_restore_cursor(); break;
         default: break;
@@ -181,24 +212,104 @@ static void do_esc(vtparse_t *p, uint8_t ch) {
             case '8': screen_restore_cursor(); break; // DECRC
             case '=': vt.keypad_app = 1; break;       // DECKPAM
             case '>': vt.keypad_app = 0; break;       // DECKPNM
+            case 'Z': respond("\x1b[?1;2c"); break;  // DECID: same answer as DA
             case 'c':                                  // RIS
                 vt.cursor_keys_app = vt.keypad_app = vt.newline_mode = 0;
+                vt.vt52 = 0;
                 screen_reset();
+                textmode_set_smooth(g_settings.smooth_scroll, 0);   // back to Setup's choice
                 break;
             default: break;
         }
     } else if (p->intermediate[0] == '(' || p->intermediate[0] == ')') {
-        // Designate G0 (ESC () or G1 (ESC )): '0' = DEC graphics, else ASCII.
+        // Designate G0 (ESC () or G1 (ESC )). '1'/'2' are the alternate ROM,
+        // standard and graphics; a stock VT100 has none, so they fall back.
         int which = (p->intermediate[0] == '(') ? 0 : 1;
-        screen_designate_charset(which, ch == '0');
+        if (ch == '0' || ch == '2')      screen_designate_charset(which, CS_DEC);
+        else if (ch == 'A')              screen_designate_charset(which, CS_UK);
+        else if (ch == 'B' || ch == '1') screen_designate_charset(which, CS_ASCII);
     } else if (p->intermediate[0] == '#') {
-        if (ch == '8') {                              // DECALN: fill with 'E'
-            for (int r = 0; r < TERM_ROWS; ++r)
-                for (int col = 0; col < TERM_COLS; ++col)
-                    tm_cells[r][col] = (cell_t){ 'E', 7, 0, 0 };
-            textmode_render_all();
-            screen_move_to(0, 0);
+        switch (ch) {
+            case '3': screen_set_line_size(LINE_DH_TOP); break;   // DECDHL top
+            case '4': screen_set_line_size(LINE_DH_BOT); break;   // DECDHL bottom
+            case '5': screen_set_line_size(LINE_SINGLE); break;   // DECSWL
+            case '6': screen_set_line_size(LINE_DW); break;       // DECDWL
+            case '8': screen_alignment(); break;                  // DECALN
+            default: break;
         }
+    }
+}
+
+// ---- C0 controls (both modes) -------------------------------------------
+static void execute(uint8_t ch) {
+    switch (ch) {
+        case 0x08: screen_backspace(); break;
+        case 0x09: screen_tab(); break;
+        case 0x0a: case 0x0b: case 0x0c:
+            if (vt.newline_mode) screen_next_line(); else screen_line_feed();
+            break;
+        case 0x0d: screen_carriage_return(); break;
+        case 0x0e: if (!vt.vt52) screen_shift(1); break;   // SO -> G1
+        case 0x0f: if (!vt.vt52) screen_shift(0); break;   // SI -> G0
+        case 0x07: bell_pending = 1; break;                // BEL
+        case 0x1a: {                                       // SUB: show the error
+            int g = scr.gl, cs = scr.charset[g];           // checkerboard, as the
+            scr.charset[g] = CS_DEC;                       // VT100 does
+            screen_put_glyph('a');
+            scr.charset[g] = cs;
+            break;
+        }
+        default: break;
+    }
+}
+
+// ---- VT52 compatibility mode ---------------------------------------------
+// The VT100's other personality (DECANM reset, ESC [ ? 2 l). A separate,
+// much smaller grammar: ESC + one letter, and ESC Y row col for addressing.
+static void vt52_byte(uint8_t b) {
+    if (b == 0x18 || b == 0x1a) { vt.vt52_state = 0; execute(b); return; }   // CAN/SUB
+    switch (vt.vt52_state) {
+    case 0:
+        if (b == 0x1b) vt.vt52_state = 1;
+        else if (b < 0x20) execute(b);
+        else if (b != 0x7f) screen_put_glyph(b);
+        return;
+    case 2: vt.vt52_row = b - 0x20; vt.vt52_state = 3; return;
+    case 3: {
+        // An out-of-range coordinate leaves that coordinate unchanged.
+        int r = vt.vt52_row, c = b - 0x20;
+        if (r < 0 || r >= TERM_ROWS) r = scr.row;
+        if (c < 0 || c >= TERM_COLS) c = scr.col;
+        screen_move_to(r, c);
+        vt.vt52_state = 0;
+        return;
+    }
+    default: break;
+    }
+    // After ESC. A control byte here is executed and the escape continues.
+    if (b < 0x20 && b != 0x1b) { execute(b); return; }
+    vt.vt52_state = 0;
+    switch (b) {
+        case 0x1b: vt.vt52_state = 1; break;
+        case 'A': screen_cursor_up(1); break;
+        case 'B': screen_cursor_down(1); break;
+        case 'C': screen_cursor_right(1); break;
+        case 'D': screen_cursor_left(1); break;
+        case 'F':                                      // graphics mode: G0 =
+            if (scr.charset[0] != CS_DEC) vt.vt52_saved_g0 = scr.charset[0];
+            screen_designate_charset(0, CS_DEC);       // special graphics
+            break;
+        case 'G': screen_designate_charset(0, vt.vt52_saved_g0); break;
+        case 'H': screen_move_to(0, 0); break;
+        case 'I': screen_reverse_index(); break;
+        case 'J': screen_erase_in_display(0); break;
+        case 'K': screen_erase_in_line(0); break;
+        case 'Y': vt.vt52_state = 2; break;
+        case 'Z': respond("\x1b/Z"); break;           // identify: VT100 in VT52 mode
+        case '=': vt.keypad_app = 1; break;
+        case '>': vt.keypad_app = 0; break;
+        case '<': vt.vt52 = 0; vtparse_init(&parser, parser.cb, 0); break;   // back to ANSI
+        default: break;
     }
 }
 
@@ -209,18 +320,7 @@ static void cb(vtparse_t *p, vt_action_t action, uint8_t ch) {
             screen_put_glyph(ch);
             break;
         case VT_ACTION_EXECUTE:
-            switch (ch) {
-                case 0x08: screen_backspace(); break;
-                case 0x09: screen_tab(); break;
-                case 0x0a: case 0x0b: case 0x0c:
-                    if (vt.newline_mode) screen_next_line(); else screen_line_feed();
-                    break;
-                case 0x0d: screen_carriage_return(); break;
-                case 0x0e: screen_shift(1); break;     // SO -> G1
-                case 0x0f: screen_shift(0); break;     // SI -> G0
-                case 0x07: bell_pending = 1; break;    // BEL
-                default: break;
-            }
+            execute(ch);
             break;
         case VT_ACTION_CSI_DISPATCH: do_csi(p, ch); break;
         case VT_ACTION_ESC_DISPATCH: do_esc(p, ch); break;
@@ -230,9 +330,12 @@ static void cb(vtparse_t *p, vt_action_t action, uint8_t ch) {
 
 void vt100_init(void) {
     vt.cursor_keys_app = vt.keypad_app = vt.newline_mode = 0;
+    vt.vt52 = vt.vt52_state = 0;
+    vt.vt52_saved_g0 = CS_ASCII;
     vtparse_init(&parser, cb, 0);
 }
 
 void vt100_feed(uint8_t c) {
-    vtparse_byte(&parser, c);
+    if (vt.vt52) vt52_byte(c);
+    else         vtparse_byte(&parser, c);
 }

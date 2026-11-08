@@ -81,8 +81,8 @@ void vtparse_byte(vtparse_t *p, uint8_t b) {
     case VT_GROUND:
         if (is_c0_exec(b) || b == 0x0a || b == 0x0d || b == 0x08 || b == 0x09 || b == 0x07)
             emit(p, VT_ACTION_EXECUTE, b);
-        else if (b >= 0x20)                  // 0x20-0xff printable (CP437)
-            emit(p, VT_ACTION_PRINT, b);
+        else if (b >= 0x20 && b != 0x7f)     // printable (CP437 above 0x7f);
+            emit(p, VT_ACTION_PRINT, b);     // DEL is ignored, as on the VT100
         break;
 
     case VT_ESCAPE:

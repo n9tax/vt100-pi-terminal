@@ -8,6 +8,11 @@
 #include <stdint.h>
 #include "config.h"
 
+// Character sets a G0/G1 slot can hold (ESC ( / ESC ) final byte).
+#define CS_ASCII 0   // 'B' (and '1', the alternate ROM, which the VT100 ships empty)
+#define CS_DEC   1   // '0' DEC Special Graphics (and '2', alternate ROM graphics)
+#define CS_UK    2   // 'A' United Kingdom: '#' is the pound sign
+
 typedef struct {
     int     row, col;            // cursor position (0-based)
     uint8_t fg, bg, attr;        // current SGR rendition
@@ -23,7 +28,7 @@ typedef struct {
     // Tab stops: 1 = a stop is set at that column.
     uint8_t tab_stops[TERM_COLS];
 
-    // Charsets: G0/G1 each 0=ASCII, 1=DEC Special Graphics. gl selects which.
+    // Charsets: G0/G1 each CS_*. gl selects which.
     int     charset[2];          // [0]=G0 [1]=G1
     int     gl;                  // 0 -> use G0, 1 -> use G1 (SI/SO)
 
@@ -81,12 +86,17 @@ void screen_set_cursor_visible(int on);      // DECTCEM
 void screen_set_reverse(int on);             // DECSCNM (whole-screen reverse)
 void screen_reset(void);                     // RIS
 
+// VT100-specific screen operations.
+void screen_set_line_size(int size);         // DECSWL/DECDWL/DECDHL: LINE_* for the cursor row
+void screen_alignment(void);                 // DECALN: fill with E, reset margins + line sizes
+void screen_column_mode(void);               // DECCOLM: clear, home, reset margins
+
 // Tab stops.
 void screen_set_tab(void);                   // HTS: set stop at cursor column
 void screen_clear_tab(int mode);             // TBC: 0=at cursor, 3=all
 
-// Charset selection (VT100 G0/G1, DEC Special Graphics).
-void screen_designate_charset(int which, int dec_graphics); // ESC ( / )
+// Charset selection (VT100 G0/G1): which = 0 for G0, 1 for G1; cs = CS_*.
+void screen_designate_charset(int which, int cs); // ESC ( / )
 void screen_shift(int gl);                    // SI (gl=0) / SO (gl=1)
 
 // Cursor visibility bookkeeping around edits.

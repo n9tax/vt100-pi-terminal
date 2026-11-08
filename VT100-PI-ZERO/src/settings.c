@@ -29,6 +29,8 @@ static const char *DEFAULT_FILE =
     "# ---- Serial host link ----\n"
     "serial_dev = " SERIAL_DEV "\n"
     "baud       = " STR(SERIAL_BAUD) "   # 300 1200 2400 4800 9600 19200 38400 57600 115200\n"
+    "format     = 8N1    # 8N1 7E1 7O1 7M1 7S1 (7 bits: the 8th/parity bit is ignored)\n"
+    "xon_xoff   = on     # send XOFF/XON when the input buffer fills, like a VT100\n"
     "\n"
     "# ---- Network / local host link ----\n"
     "# Connect on boot instead of serial. Priority: local_shell > ssh_host > telnet_host.\n"
@@ -98,6 +100,8 @@ static int parse_cursor(const char *v, int fallback) {
 static void set_defaults(void) {
     snprintf(g_settings.serial_dev, sizeof g_settings.serial_dev, "%s", SERIAL_DEV);
     g_settings.baud = SERIAL_BAUD;
+    g_settings.serial_format = SERIAL_FORMAT_DEFAULT;
+    g_settings.xon_xoff = XON_XOFF_DEFAULT;
     int t = themes_index_of(THEME_DEFAULT_NAME);
     g_settings.theme = t >= 0 ? t : 0;
     g_settings.cursor_style = 0;
@@ -156,6 +160,12 @@ static void write_default(void) {
 static void apply(const char *key, const char *val) {
     if (!strcasecmp(key, "serial_dev"))       snprintf(g_settings.serial_dev, sizeof g_settings.serial_dev, "%s", val);
     else if (!strcasecmp(key, "baud"))        g_settings.baud = atoi(val);
+    else if (!strcasecmp(key, "format")) {
+        int f = settings_serial_format_parse(val);
+        if (f >= 0) g_settings.serial_format = f;
+        else fprintf(stderr, "settings: unknown format '%s' (want 8N1 7E1 7O1 7M1 7S1)\n", val);
+    }
+    else if (!strcasecmp(key, "xon_xoff"))    g_settings.xon_xoff = parse_bool(val, g_settings.xon_xoff);
     else if (!strcasecmp(key, "theme"))       { int t = themes_index_of(val); if (t >= 0) g_settings.theme = t; }
     else if (!strcasecmp(key, "cursor"))      g_settings.cursor_style = parse_cursor(val, g_settings.cursor_style);
     else if (!strcasecmp(key, "local_echo"))  g_settings.local_echo = parse_bool(val, g_settings.local_echo);
@@ -213,6 +223,15 @@ const char *settings_path(void) { return cfg_path; }
 
 const char *settings_theme_name(int theme) { return themes_name(theme); }
 
+static const char *const fmt_names[SERIAL_FMT_COUNT] = { "8N1", "7E1", "7O1", "7M1", "7S1" };
+const char *settings_serial_format_name(int fmt) {
+    return (fmt >= 0 && fmt < SERIAL_FMT_COUNT) ? fmt_names[fmt] : fmt_names[0];
+}
+int settings_serial_format_parse(const char *s) {
+    for (int i = 0; i < SERIAL_FMT_COUNT; ++i) if (!strcasecmp(s, fmt_names[i])) return i;
+    return -1;
+}
+
 uint32_t settings_parse_hex(const char *s) {
     if (!s) return 0;
     if (*s == '#') ++s;
@@ -243,6 +262,8 @@ void settings_save(void) {
         "# ---- Serial host link ----\n"
         "serial_dev = %s\n"
         "baud       = %d   # 300 1200 2400 4800 9600 19200 38400 57600 115200\n"
+        "format     = %s    # 8N1 7E1 7O1 7M1 7S1 (7 bits: the 8th/parity bit is ignored)\n"
+        "xon_xoff   = %s     # send XOFF/XON when the input buffer fills, like a VT100\n"
         "\n"
         "# ---- Network / local host link ----\n"
         "# Connect on boot instead of serial. Priority: local_shell > ssh_host > telnet_host.\n"
@@ -280,6 +301,8 @@ void settings_save(void) {
         "# path. Setup (Ctrl+F3) cycles the bundled fonts; see assets/FONTS.md.\n"
         "font       = %s\n",
         g_settings.serial_dev, g_settings.baud,
+        settings_serial_format_name(g_settings.serial_format),
+        g_settings.xon_xoff ? "on" : "off",
         g_settings.local_shell ? "on" : "off",
         g_settings.ssh_host, g_settings.ssh_port, g_settings.telnet_host, g_settings.telnet_port,
         g_settings.auto_reconnect ? "on" : "off",

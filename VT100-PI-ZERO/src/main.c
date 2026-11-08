@@ -124,6 +124,25 @@ static int inbuf_pop(void) {
     return b;
 }
 
+// XON/XOFF, as the VT100 does it: XOFF when the ring is three-quarters full,
+// XON once it is down to a quarter. 64 KB is over a minute of 9600 baud, so in
+// practice this fires only with Setup open on a busy host, or on a smooth-
+// scrolled flood -- and it means bytes are held at the host instead of lost.
+static int xoff_sent;
+static int inbuf_used(void) { return (inbuf_head - inbuf_tail + INBUF_SIZE) % INBUF_SIZE; }
+static void xon_xoff_update(void) {
+    int used = inbuf_used();
+    if (!xoff_sent && g_settings.xon_xoff && used > INBUF_SIZE * 3 / 4) {
+        static const uint8_t xoff = 0x13;
+        host_write(&xoff, 1);
+        xoff_sent = 1;
+    } else if (xoff_sent && (!g_settings.xon_xoff || used < INBUF_SIZE / 4)) {
+        static const uint8_t xon = 0x11;   // also when XON/XOFF is switched off
+        host_write(&xon, 1);
+        xoff_sent = 0;
+    }
+}
+
 // Network (Telnet) received bytes land in the same ring as serial, so they get
 // the same paced feed / smooth scroll.
 static void net_emit(uint8_t b) { inbuf_push(b); }
@@ -154,7 +173,7 @@ int main(void) {
     textmode_set_smooth(g_settings.smooth_scroll, g_settings.scroll_speed);
     textmode_set_scroll_depth(g_settings.scroll_depth);
     autospeed_set(g_settings.auto_speed, g_settings.scroll_speed, now_ms());
-    int serial_ok = (serial_init(g_settings.serial_dev, g_settings.baud) == 0);
+    int serial_ok = (serial_init(g_settings.serial_dev, g_settings.baud, g_settings.serial_format) == 0);
     kbd_init();
     screen_init();
     vt100_init();
@@ -229,6 +248,8 @@ int main(void) {
         }
 
         if (!booting && kbd_take_setup_toggle()) setup_toggle();
+        // BREAK only means something on the RS232 line.
+        if (kbd_take_break() && !booting && !hostconn_connected()) serial_send_break();
 
         // Service the network/PTY link every iteration, including while Setup is
         // open: it drains received bytes into the ring (drained once Setup
@@ -251,6 +272,14 @@ int main(void) {
             // Setup owns the screen: route keys to the menu, pause the host link.
             int k;
             while ((k = kbd_getc()) >= 0) setup_feed((uint8_t)k);
+            // Keep reading serial into the ring too: left in the kernel, it
+            // overflows the tty buffer within seconds and is lost. The ring
+            // holds far more, and XON/XOFF holds the rest at the host.
+            if (!hostconn_connected()) {
+                int c;
+                while ((c = serial_getc()) >= 0) inbuf_push((uint8_t)c);
+            }
+            xon_xoff_update();
             // The ring keeps filling behind the menu; show that live rather than
             // freezing the reading from whenever Setup was opened.
             flow_sample_paused(inbuf_pending_lines());
@@ -297,6 +326,7 @@ int main(void) {
             // Sampled here, in the terminal branch only: while Setup owns the
             // screen the ring is not drained, so sampling there would read as a
             // growing overrun that is really just the menu being open.
+            xon_xoff_update();
             flow_sample(inbuf_pending_lines(), textmode_scroll_busy(), fed);
             autospeed_update(inbuf_lines_total, inbuf_pending_lines(), fed, now_ms());
 

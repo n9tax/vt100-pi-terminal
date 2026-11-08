@@ -7,9 +7,20 @@
 
 #include <stdint.h>
 
+// Serial frame formats. With 7 data bits the kernel strips the eighth (parity)
+// bit, the way a VT100 ignores it.
+#define SERIAL_FMT_8N1   0
+#define SERIAL_FMT_7E1   1
+#define SERIAL_FMT_7O1   2
+#define SERIAL_FMT_7M1   3   // mark parity: the eighth bit always 1
+#define SERIAL_FMT_7S1   4   // space parity: always 0
+#define SERIAL_FMT_COUNT 5
+
 typedef struct {
     char serial_dev[128];   // e.g. /dev/serial0
     int  baud;              // 300..115200
+    int  serial_format;     // SERIAL_FMT_*
+    int  xon_xoff;          // 1 = send XOFF/XON to throttle the host
     int  theme;             // themes.c index
     int  cursor_style;      // 0 = block, 1 = underline
     int  local_echo;        // 0/1
@@ -42,6 +53,10 @@ const char *settings_path(void);
 
 // Write g_settings back to the config file (used by the Setup menu on save).
 void settings_save(void);
+
+// "8N1", "7E1", ... for a SERIAL_FMT_* value, and back (-1 if unknown).
+const char *settings_serial_format_name(int fmt);
+int settings_serial_format_parse(const char *s);
 
 // Name of a theme index ("amber", "c64", ...); "amber" if out of range.
 const char *settings_theme_name(int theme);

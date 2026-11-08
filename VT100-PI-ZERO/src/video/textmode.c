@@ -21,6 +21,7 @@
 #include <drm_mode.h>
 
 cell_t tm_cells[TERM_ROWS][TERM_COLS];
+uint8_t tm_line[TERM_ROWS];
 
 static int drm_fd = -1;
 static uint32_t crtc_id, connector_id;
@@ -197,20 +198,38 @@ static inline uint32_t blend(uint32_t fg, uint32_t bg, int a) {
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
+// Line size of a row as rendered: the Setup menu draws over the grid and must
+// stay single-size whatever the host left on those rows.
+static inline int line_attr(int row) { return chrome_on ? LINE_SINGLE : tm_line[row]; }
+
+// Pixel rect of cell (row,col). On a double-width/-height row, cell c covers
+// grid columns 2c and 2c+1.
+static void cell_rect(int row, int col, int *x0, int *x1, int *y0, int *y1) {
+    int wide = line_attr(row) != LINE_SINGLE;
+    *x0 = cell_x0(wide ? col * 2 : col);
+    *x1 = cell_x0(wide ? col * 2 + 2 : col + 1);
+    *y0 = cell_y0(row);
+    *y1 = cell_y0(row + 1);
+}
+
 // Blit one glyph into cell (row,col)'s pixel rect by sampling its anti-aliased
 // coverage atlas (rendered at ~cell size by glyphs.c) and alpha-blending fg/bg.
 // The atlas is already smooth, so a nearest sample into the cell rect is fine.
-static void blit_glyph(int row, int col, uint8_t glyph, uint32_t fg, uint32_t bg, uint8_t attr) {
+// A double-height row samples only its half of the glyph, stretched to the row.
+static void blit_glyph(int row, int col, int glyph, uint32_t fg, uint32_t bg, uint8_t attr) {
     const uint8_t *al = glyph_alpha(glyph);
     int aw = glyph_atlas_w(), ah = glyph_atlas_h();
-    int x0 = cell_x0(col), x1 = cell_x0(col + 1);
-    int y0 = cell_y0(row), y1 = cell_y0(row + 1);
+    int x0, x1, y0, y1;
+    cell_rect(row, col, &x0, &x1, &y0, &y1);
     int cw = x1 - x0, ch = y1 - y0;
     if (cw < 1) cw = 1;
     if (ch < 1) ch = 1;
+    int la = line_attr(row);
+    int span = (la == LINE_DH_TOP || la == LINE_DH_BOT) ? ah / 2 : ah;   // atlas rows shown
+    int off  = (la == LINE_DH_BOT) ? ah - span : 0;
     int ul = (attr & ATTR_UNDERLINE) ? 1 : 0;
     for (int y = y0; y < y1; ++y) {
-        int ay = (y - y0) * ah / ch;
+        int ay = off + (y - y0) * span / ch;
         int uline = ul && (ay >= ah - 2);
         const uint8_t *arow = al + ay * aw;
         for (int x = x0; x < x1; ++x) {
@@ -222,9 +241,14 @@ static void blit_glyph(int row, int col, uint8_t glyph, uint32_t fg, uint32_t bg
 }
 
 static void draw_cell(int row, int col, int cursor) {
+    // The right half of a double-size row is off screen: its pixels belong to
+    // the doubled cells of the left half.
+    if (line_attr(row) != LINE_SINGLE && col >= TERM_COLS / 2) return;
     cell_t c = tm_cells[row][col];
     int hidden = (c.attr & ATTR_BLINK) && blink_phase;
-    uint8_t glyph = hidden ? ' ' : c.glyph;
+    int glyph = hidden ? ' ' : c.glyph;
+    if (!hidden && (c.attr & ATTR_DECG) && c.glyph >= 0x5f && c.glyph <= 0x7e)
+        glyph = GLYPH_DEC_BASE + (c.glyph - 0x5f);
 
     int rev = ((c.attr & ATTR_REVERSE) ? 1 : 0) ^ screen_reverse ^ flash_on ^ (cursor ? 1 : 0);
     uint8_t fgi = c.fg, bgi = c.bg;
@@ -237,9 +261,9 @@ static void draw_cell(int row, int col, int cursor) {
         // Underline cursor: draw the glyph normally, then an underline bar
         // ~2 font rows thick, scaled to this cell's height.
         blit_glyph(row, col, glyph, palette_rgb(fgi), palette_rgb(bgi), c.attr);
-        int x0 = cell_x0(col), x1 = cell_x0(col + 1);
-        int y1 = cell_y0(row + 1);
-        int bar = (y1 - cell_y0(row)) / 12;
+        int x0, x1, y0, y1;
+        cell_rect(row, col, &x0, &x1, &y0, &y1);
+        int bar = (y1 - y0) / 12;
         if (bar < 1) bar = 1;
         for (int y = y1 - bar; y < y1; ++y)
             for (int x = x0; x < x1; ++x)
@@ -274,9 +298,11 @@ void textmode_init(void) {
     fb_mem = tall_mem + (size_t)base_y * fb_pitch;   // rendering targets the content region
     d = 0;
 
-    for (int r = 0; r < TERM_ROWS; ++r)
+    for (int r = 0; r < TERM_ROWS; ++r) {
+        tm_line[r] = LINE_SINGLE;
         for (int c = 0; c < TERM_COLS; ++c)
             tm_cells[r][c] = (cell_t){ ' ', 7, 0, 0 };
+    }
     textmode_render_all();
 }
 
