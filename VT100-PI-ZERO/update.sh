@@ -15,6 +15,7 @@
 # Updates come from the git clone install.sh was run from (recorded in
 # /etc/vt100-pi/update.conf). git and the build run as that clone's owner, so
 # the tree never gets root-owned files; only the install step runs as root.
+# Any it does get (from a git run as root by hand) are handed back first.
 # Only commits that touch VT100-PI-ZERO/ count as an update.
 #
 # The result goes to /var/lib/vt100-pi/update.status (key=value) for the
@@ -75,6 +76,25 @@ as_owner() {
 }
 git_() { as_owner git -C "$REPO" "$@"; }
 
+# A git or build run as root in the clone (sudo, or a root shell) leaves files
+# the owner cannot write, and the next fetch dies with "unpack-objects failed".
+# We are root, so give them back before touching the tree.
+fix_ownership() {
+    local n
+    n=$(find "$REPO" ! -user "$OWNER" -print -quit 2>/dev/null)
+    [ -n "$n" ] || return 0
+    echo "vt100-pi-update: returning root-owned files in $REPO to $OWNER"
+    find "$REPO" ! -user "$OWNER" -exec chown -h "$OWNER": {} +
+}
+
+# git's real complaint: the first error:/fatal: line (the last line is often
+# just a generic "unpack-objects failed"), else whatever it said last.
+git_error() {
+    local e
+    e=$(grep -m1 -E '^(error|fatal):' "$ERR")
+    echo "${e:-$(tail -1 "$ERR")}"
+}
+
 # What is installed: the commit install.sh recorded, or HEAD for an install
 # that predates the record.
 base_commit() {
@@ -87,8 +107,9 @@ base_commit() {
 check() {
     state=checking msg="checking GitHub"
     write_status
+    fix_ownership
     git_ fetch --quiet 2>"$ERR" \
-        || fail "fetch failed: $(tail -1 "$ERR")"
+        || fail "fetch failed: $(git_error)"
     git_ rev-parse --verify --quiet '@{u}' >/dev/null \
         || fail "branch has no upstream to update from"
     local base
@@ -114,7 +135,7 @@ apply() {
     state=updating msg="pulling"
     write_status
     git_ pull --ff-only --quiet 2>"$ERR" \
-        || fail "pull failed (local changes?): $(tail -1 "$ERR")"
+        || fail "pull failed (local changes?): $(git_error)"
 
     # Built before anything is stopped: a broken build leaves the running
     # terminal alone.

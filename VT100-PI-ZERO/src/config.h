@@ -164,6 +164,11 @@
 // Connect to a local shell on the Pi (use the Pi OS directly) instead of a
 // serial/network host. Highest priority when on.
 #define LOCAL_SHELL_DEFAULT 0
+// Who the local shell logs in as ("" = the git clone's owner from the updater's
+// config, else the first normal user). It is never root unless no other
+// account exists: use sudo for root, as on any other login.
+#define LOCAL_SHELL_USER    ""
+#define UPDATE_CONF_PATH    "/etc/vt100-pi/update.conf"
 
 // ---- Reconnect --------------------------------------------------------------
 // A network/PTY host link can end at any time (server reboot, ssh timeout, a

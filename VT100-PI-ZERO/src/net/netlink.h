@@ -20,7 +20,8 @@ int  netlink_connect_telnet(const char *host, int port);
 // port 22 (or <= 0) passes no -p, so a Port set in ~/.ssh/config still applies.
 int  netlink_connect_ssh(const char *dest, int port);
 
-// Run a local login shell on the Pi over a PTY (for using the Pi OS directly).
+// Run a local login shell on the Pi over a PTY (for using the Pi OS directly),
+// as a normal user rather than root (see LOCAL_SHELL_USER in config.h).
 // Returns 0 on success, -1 on failure.
 int  netlink_connect_shell(void);
 

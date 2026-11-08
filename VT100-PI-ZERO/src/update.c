@@ -1,6 +1,7 @@
 // See update.h. The status file is key=value lines written whole (via rename)
 // by update.sh, so a read never sees half of one.
 #include "update.h"
+#include "config.h"   // UPDATE_CONF_PATH
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define UPDATE_CONF   "/etc/vt100-pi/update.conf"
+#define UPDATE_CONF   UPDATE_CONF_PATH
 #define UPDATE_STATUS "/var/lib/vt100-pi/update.status"
 
 typedef struct {

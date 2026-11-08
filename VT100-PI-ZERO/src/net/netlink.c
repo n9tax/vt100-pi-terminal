@@ -20,6 +20,7 @@
 #include <sys/wait.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <pwd.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
@@ -208,8 +209,56 @@ int netlink_connect_ssh(const char *dest, int port) {
     return 0;
 }
 
+// Who the local shell logs in as. The terminal runs as root (DRM master, raw
+// input), but handing root to whoever is at the keyboard is how a `git pull`
+// in the clone leaves root-owned objects that break the updater. So: the user
+// named in LOCAL_SHELL_USER, else the clone owner install.sh recorded for the
+// updater, else the first ordinary account. NULL -> no such user; run the
+// shell as ourselves.
+static const char *shell_user(char *buf, size_t n) {
+    if (LOCAL_SHELL_USER[0]) { snprintf(buf, n, "%s", LOCAL_SHELL_USER); return buf; }
+
+    FILE *f = fopen(UPDATE_CONF_PATH, "r");
+    if (f) {
+        char line[256];
+        buf[0] = 0;
+        while (fgets(line, sizeof line, f)) {
+            if (strncmp(line, "OWNER=", 6)) continue;
+            char *v = line + 6;
+            v[strcspn(v, "\r\n")] = 0;
+            if (*v == '\'' || *v == '"') { ++v; v[strcspn(v, "'\"")] = 0; }
+            snprintf(buf, n, "%s", v);
+        }
+        fclose(f);
+        struct passwd *pw = buf[0] ? getpwnam(buf) : NULL;
+        if (pw && pw->pw_uid != 0) return buf;
+    }
+
+    // Lowest uid in the normal-user range (1000 on Raspberry Pi OS).
+    struct passwd *pw;
+    uid_t best = (uid_t)-1;
+    setpwent();
+    while ((pw = getpwent()))
+        if (pw->pw_uid >= 1000 && pw->pw_uid < 65534 && pw->pw_uid < best) {
+            best = pw->pw_uid;
+            snprintf(buf, n, "%s", pw->pw_name);
+        }
+    endpwent();
+    return best != (uid_t)-1 ? buf : NULL;
+}
+
 int netlink_connect_shell(void) {
     netlink_close();
+    char user[256];
+    const char *who = getuid() == 0 ? shell_user(user, sizeof user) : NULL;
+    if (who) {
+        // runuser -l: a full login as that user (their shell, HOME, PATH),
+        // keeping TERM. No password: we are root.
+        char *argv[] = { "runuser", "-l", (char *)who, NULL };
+        if (spawn_pty(argv) != 0) return -1;
+        fprintf(stderr, "netlink: local shell as %s (pid %d)\n", who, (int)child_pid);
+        return 0;
+    }
     const char *sh = getenv("SHELL");
     if (!sh || !sh[0]) sh = "/bin/bash";
     char *argv[] = { (char *)sh, "-l", NULL };   // login shell on the Pi
