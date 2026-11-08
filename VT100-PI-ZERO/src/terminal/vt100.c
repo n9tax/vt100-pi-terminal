@@ -27,6 +27,7 @@ int vt100_cursor_keys_app(void) { return vt.cursor_keys_app; }
 int vt100_keypad_app(void)      { return vt.keypad_app; }
 int vt100_newline_mode(void)    { return vt.newline_mode; }
 int vt100_vt52_mode(void)       { return vt.vt52; }
+void vt100_set_newline_mode(int on) { vt.newline_mode = on ? 1 : 0; }
 
 // ---- helpers -------------------------------------------------------------
 static int pget(vtparse_t *p, int i, int def) {
@@ -214,7 +215,8 @@ static void do_esc(vtparse_t *p, uint8_t ch) {
             case '>': vt.keypad_app = 0; break;       // DECKPNM
             case 'Z': respond("\x1b[?1;2c"); break;  // DECID: same answer as DA
             case 'c':                                  // RIS
-                vt.cursor_keys_app = vt.keypad_app = vt.newline_mode = 0;
+                vt.cursor_keys_app = vt.keypad_app = 0;
+                vt.newline_mode = g_settings.newline_mode;   // RIS restores SET-UP
                 vt.vt52 = 0;
                 screen_reset();
                 textmode_set_smooth(g_settings.smooth_scroll, 0);   // back to Setup's choice
@@ -329,7 +331,8 @@ static void cb(vtparse_t *p, vt_action_t action, uint8_t ch) {
 }
 
 void vt100_init(void) {
-    vt.cursor_keys_app = vt.keypad_app = vt.newline_mode = 0;
+    vt.cursor_keys_app = vt.keypad_app = 0;
+    vt.newline_mode = g_settings.newline_mode;
     vt.vt52 = vt.vt52_state = 0;
     vt.vt52_saved_g0 = CS_ASCII;
     vtparse_init(&parser, cb, 0);

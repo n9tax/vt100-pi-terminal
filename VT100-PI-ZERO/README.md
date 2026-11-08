@@ -259,6 +259,13 @@ host software and `.vt` animations behave as they did on the real terminal:
 - **DECALN** (`ESC # 8`), **DECID** (`ESC Z`), **DECREQTPARM** (`ESC [ x`,
   reports the baud and format below).
 - DEL is ignored, and SUB cancels a sequence and shows the checkerboard.
+- **New line** (Setup row, `newline`), the VT100 SET-UP's NEWLINE (LNM): a
+  received LF also returns the carriage, and Return sends CR LF. Turn it on for
+  files with bare-LF line ends (Unix text, many `.vt` animations), which
+  otherwise stair-step across the screen. Hosts can still set or reset it
+  (`ESC [ 20 h`/`l`); RIS goes back to the Setup value. Leave it off for hosts
+  that send CR LF themselves -- with it on, Return's extra LF can show up as
+  blank lines there.
 - **Serial format** (Setup row, `format`): 8N1, or 7 data bits with even, odd,
   mark or space parity. With 7 bits the eighth bit is ignored, as on a VT100,
   so a host sending parity no longer shows up as stray graphics characters.

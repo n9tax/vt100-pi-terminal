@@ -49,6 +49,7 @@ static const char *DEFAULT_FILE =
     "theme      = amber      # color amber green white blue red yellow c64 vic20 c128 borland custom\n"
     "cursor     = block      # block | underline\n"
     "local_echo = off        # on | off  (a real terminal leaves this off; the host echoes)\n"
+    "newline    = off        # on = LF also does CR (for bare-LF files); Return sends CR LF\n"
     "\n"
     "smooth_scroll = on      # on | off  (slide text up instead of jumping)\n"
     "scroll_speed  = 300     # pixels/second (a line is ~32px; bursts catch up)\n"
@@ -106,6 +107,7 @@ static void set_defaults(void) {
     g_settings.theme = t >= 0 ? t : 0;
     g_settings.cursor_style = 0;
     g_settings.local_echo = LOCAL_ECHO;
+    g_settings.newline_mode = NEWLINE_MODE_DEFAULT;
     snprintf(g_settings.font_path, sizeof g_settings.font_path, "%s", FONT_TTF_PATH);
     snprintf(g_settings.fg_hex, sizeof g_settings.fg_hex, "%s", CUSTOM_FG_DEFAULT);
     snprintf(g_settings.bg_hex, sizeof g_settings.bg_hex, "%s", CUSTOM_BG_DEFAULT);
@@ -169,6 +171,7 @@ static void apply(const char *key, const char *val) {
     else if (!strcasecmp(key, "theme"))       { int t = themes_index_of(val); if (t >= 0) g_settings.theme = t; }
     else if (!strcasecmp(key, "cursor"))      g_settings.cursor_style = parse_cursor(val, g_settings.cursor_style);
     else if (!strcasecmp(key, "local_echo"))  g_settings.local_echo = parse_bool(val, g_settings.local_echo);
+    else if (!strcasecmp(key, "newline"))     g_settings.newline_mode = parse_bool(val, g_settings.newline_mode);
     else if (!strcasecmp(key, "font"))        snprintf(g_settings.font_path, sizeof g_settings.font_path, "%s", val);
     else if (!strcasecmp(key, "fg_color"))    snprintf(g_settings.fg_hex, sizeof g_settings.fg_hex, "%s", val);
     else if (!strcasecmp(key, "bg_color"))    snprintf(g_settings.bg_hex, sizeof g_settings.bg_hex, "%s", val);
@@ -281,6 +284,7 @@ void settings_save(void) {
         "theme      = %s      # color amber green white blue red yellow c64 vic20 c128 borland custom\n"
         "cursor     = %s      # block | underline\n"
         "local_echo = %s        # on | off\n"
+        "newline    = %s        # on = LF also does CR (for bare-LF files); Return sends CR LF\n"
         "\n"
         "smooth_scroll = %s      # on | off  (slide text up instead of jumping)\n"
         "scroll_speed  = %d     # pixels/second (a line is ~32px; bursts catch up)\n"
@@ -309,6 +313,7 @@ void settings_save(void) {
         settings_theme_name(g_settings.theme),
         g_settings.cursor_style ? "underline" : "block",
         g_settings.local_echo ? "on" : "off",
+        g_settings.newline_mode ? "on" : "off",
         g_settings.smooth_scroll ? "on" : "off", g_settings.scroll_speed,
         g_settings.scroll_depth, g_settings.scroll_dump,
         g_settings.auto_speed ? "on" : "off", g_settings.speed_avg_ms,

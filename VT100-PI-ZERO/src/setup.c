@@ -14,6 +14,7 @@
 #include "autospeed.h"
 #include "service.h"
 #include "update.h"
+#include "terminal/vt100.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -24,7 +25,7 @@
 #include <arpa/inet.h>
 
 enum { F_SHELL, F_SERIAL, F_BAUD, F_FORMAT, F_XON, F_SSH, F_SPORT, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
-       F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_SMOOTH, F_SPEED, F_AUTOSPD,
+       F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_NEWLINE, F_SMOOTH, F_SPEED, F_AUTOSPD,
        F_AVG, F_DEPTH, F_DUMP, F_FONT, F_BOOT, F_UPDATE, NFIELDS };
 
 // Layout: title, address, buffer line, the field list, one help line on the
@@ -125,6 +126,8 @@ static void field_value(int i, char *out, size_t n) {
         case F_BG:     snprintf(out, n, "%s", work.bg_hex); break;
         case F_CURSOR: snprintf(out, n, "%s", work.cursor_style ? "underline" : "block"); break;
         case F_ECHO:   snprintf(out, n, "%s", work.local_echo ? "on" : "off"); break;
+        case F_NEWLINE: snprintf(out, n, "%s", work.newline_mode
+                                 ? "on  (LF = CR LF, Return sends CR LF)" : "off"); break;
         case F_SMOOTH: snprintf(out, n, "%s", work.smooth_scroll ? "on" : "off"); break;
         case F_SPEED:
             // Under auto speed the configured value is only the starting point,
@@ -150,7 +153,7 @@ static void draw(void) {
     static const char *labels[NFIELDS] = {
         "Local shell", "Serial device", "Baud rate", "Serial format", "XON/XOFF", "SSH host", "SSH port", "Telnet host",
         "Telnet port", "Auto reconnect", "Host link", "Theme", "Custom FG",
-        "Custom BG", "Cursor", "Local echo", "Smooth scroll", "Scroll speed",
+        "Custom BG", "Cursor", "Local echo", "New line", "Smooth scroll", "Scroll speed",
         "Auto speed", "Speed averaging", "Scroll depth", "Overrun limit", "Font",
         "Start at boot", "Updates",
     };
@@ -255,6 +258,7 @@ static void change(int d) {
         case F_THEME:  { int nt = themes_count(); work.theme = (work.theme + d + nt) % nt; break; }
         case F_CURSOR: work.cursor_style ^= 1; break;
         case F_ECHO:   work.local_echo ^= 1; break;
+        case F_NEWLINE: work.newline_mode ^= 1; break;
         case F_SMOOTH: work.smooth_scroll ^= 1; break;
         case F_SPEED: {
             // Arithmetic stepping rather than a fixed table, so the speed can be
@@ -341,6 +345,7 @@ static void do_save(int force_reconnect) {
     textmode_set_custom_colors(settings_parse_hex(work.fg_hex), settings_parse_hex(work.bg_hex));
     textmode_set_theme(work.theme);
     textmode_set_cursor_style(work.cursor_style);
+    if (work.newline_mode != orig.newline_mode) vt100_set_newline_mode(work.newline_mode);
     textmode_set_smooth(work.smooth_scroll, work.scroll_speed);
     textmode_set_scroll_depth(work.scroll_depth);
     autospeed_set(work.auto_speed, work.scroll_speed, now_ms_setup());

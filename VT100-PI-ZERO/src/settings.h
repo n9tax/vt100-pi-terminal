@@ -24,6 +24,7 @@ typedef struct {
     int  theme;             // themes.c index
     int  cursor_style;      // 0 = block, 1 = underline
     int  local_echo;        // 0/1
+    int  newline_mode;      // 1 = LNM at power-on/RIS: LF does CR LF, Return sends CR LF
     char font_path[256];    // "" = bundled/system font, else absolute .ttf path
     char fg_hex[8];         // custom-theme foreground "#RRGGBB"
     char bg_hex[8];         // custom-theme background "#RRGGBB"

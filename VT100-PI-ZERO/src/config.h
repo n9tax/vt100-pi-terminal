@@ -48,6 +48,11 @@
 // A real terminal leaves this OFF (the host echoes).
 #define LOCAL_ECHO 0
 
+// New-line mode (LNM) at power-on, the VT100 SET-UP's NEWLINE: received LF
+// also returns the carriage, and Return sends CR LF. On for text with bare-LF
+// line ends (Unix files, many .vt animations); hosts can still set/reset it.
+#define NEWLINE_MODE_DEFAULT 0
+
 // ---- Smooth scroll ----------------------------------------------------------
 // Slide text up a few pixels per frame instead of jumping a whole line. Speed is
 // in pixels/second (a line is ~32px tall); bursts catch up and very fast output

@@ -13,6 +13,7 @@ void vt100_feed(uint8_t c);          // feed one received byte
 int vt100_cursor_keys_app(void);     // DECCKM: arrows send SS3 not CSI
 int vt100_keypad_app(void);          // DECKPAM/DECKPNM
 int vt100_newline_mode(void);        // LNM: Return sends CR+LF
+void vt100_set_newline_mode(int on); // LNM from Setup (NEWLINE); hosts may change it
 int vt100_vt52_mode(void);           // DECANM reset: keys send VT52 sequences
 
 // Returns (and clears) 1 if a BEL was received since the last call.
