@@ -14,6 +14,7 @@
 #include "autospeed.h"
 #include "service.h"
 #include "update.h"
+#include "net/webview.h"
 #include "terminal/vt100.h"
 
 #include <string.h>
@@ -26,7 +27,7 @@
 
 enum { F_SHELL, F_SERIAL, F_BAUD, F_FORMAT, F_XON, F_SSH, F_SPORT, F_TELNET, F_TPORT, F_AUTOREC, F_LINK,
        F_THEME, F_FG, F_BG, F_CURSOR, F_ECHO, F_NEWLINE, F_SMOOTH, F_SPEED, F_AUTOSPD,
-       F_AVG, F_DEPTH, F_DUMP, F_FONT, F_BOOT, F_UPDATE, NFIELDS };
+       F_AVG, F_DEPTH, F_DUMP, F_FONT, F_WEB, F_WPORT, F_BOOT, F_UPDATE, NFIELDS };
 
 // Layout: title, address, buffer line, the field list, one help line on the
 // last row. There are more fields than rows now, so the list scrolls to keep the
@@ -41,7 +42,7 @@ static int first_vis;   // index of the field drawn on ROW_FIELD0
 
 static int is_text_field(int i) {
     return i == F_SERIAL || i == F_FG || i == F_BG || i == F_SSH || i == F_SPORT ||
-           i == F_TELNET;
+           i == F_TELNET || i == F_WPORT;
 }
 
 // Action rows do something when Enter lands on them, instead of the usual
@@ -114,6 +115,17 @@ static void field_value(int i, char *out, size_t n) {
                        else out[0] = '\0';   // cleared mid-edit; saves as 22
                        break;
         case F_TELNET: snprintf(out, n, "%s", work.telnet_host); break;
+        case F_WEB:
+            // Live state (URL, viewers, a port clash) once saved; until then
+            // just what Enter will do.
+            if (work.web_view == g_settings.web_view && work.web_port == g_settings.web_port)
+                webview_describe(out, (unsigned)n, ip_str);
+            else
+                snprintf(out, n, "%s", work.web_view ? "on  (Enter to start)" : "off");
+            break;
+        case F_WPORT:  if (work.web_port > 0) snprintf(out, n, "%d", work.web_port);
+                       else out[0] = '\0';   // cleared mid-edit; saves as the default
+                       break;
         case F_TPORT:  snprintf(out, n, "%d", work.telnet_port); break;
         case F_AUTOREC: snprintf(out, n, "%s", work.auto_reconnect ? "on" : "off"); break;
         case F_LINK:   snprintf(out, n, "%s", hostconn_status()); break;
@@ -155,7 +167,7 @@ static void draw(void) {
         "Telnet port", "Auto reconnect", "Host link", "Theme", "Custom FG",
         "Custom BG", "Cursor", "Local echo", "New line", "Smooth scroll", "Scroll speed",
         "Auto speed", "Speed averaging", "Scroll depth", "Overrun limit", "Font",
-        "Start at boot", "Updates",
+        "Web view", "Web port", "Start at boot", "Updates",
     };
     for (int r = 0; r < TERM_ROWS; ++r)
         for (int c = 0; c < TERM_COLS; ++c)
@@ -202,7 +214,9 @@ static void draw(void) {
     if (sel == F_UPDATE && update_available()) {
         snprintf(uhelp, sizeof uhelp, "New: %s", update_subject());
         help = uhelp;
-    } else if (sel == F_UPDATE)
+    } else if (sel == F_WEB || sel == F_WPORT)
+        help = "OBS: add a Browser Source with that URL.  No login: LAN can watch";
+    else if (sel == F_UPDATE)
         help = "Enter: check GitHub for updates               Ctrl+F3: cancel";
     else if (is_action_field(sel))
         help = "Enter: reconnect now                          Ctrl+F3: cancel";
@@ -243,6 +257,7 @@ static void change(int d) {
             break;
         case F_XON:    work.xon_xoff ^= 1; break;
         case F_SHELL:  work.local_shell ^= 1; break;
+        case F_WEB:    work.web_view ^= 1; break;
         case F_AUTOREC: work.auto_reconnect ^= 1; break;
         case F_AUTOSPD: work.auto_speed ^= 1; break;
         case F_AVG: {
@@ -300,10 +315,11 @@ static void change(int d) {
 }
 
 static void edit_text(uint8_t b) {   // the typed fields: serial device, custom fg/bg
-    if (sel == F_SPORT) {   // numeric: digits append, backspace drops the last one
-        if (b == 0x7f || b == 0x08) work.ssh_port /= 10;
-        else if (b >= '0' && b <= '9' && work.ssh_port * 10 + (b - '0') <= 65535)
-            work.ssh_port = work.ssh_port * 10 + (b - '0');
+    if (sel == F_SPORT || sel == F_WPORT) {   // ports: digits append, backspace drops one
+        int *port = sel == F_SPORT ? &work.ssh_port : &work.web_port;
+        if (b == 0x7f || b == 0x08) *port /= 10;
+        else if (b >= '0' && b <= '9' && *port * 10 + (b - '0') <= 65535)
+            *port = *port * 10 + (b - '0');
         return;
     }
     char  *buf;
@@ -337,6 +353,7 @@ static void restore_screen(void) {
 // back before Setup would reconnect it.
 static void do_save(int force_reconnect) {
     if (work.ssh_port <= 0) work.ssh_port = SSH_PORT_DEFAULT;   // left blank
+    if (work.web_port <= 0) work.web_port = WEB_PORT_DEFAULT;
     g_settings = work;
     settings_save();
 
@@ -358,6 +375,7 @@ static void do_save(int force_reconnect) {
         serial_reconfigure(work.serial_dev, work.baud, work.serial_format);
     if (strcmp(work.font_path, orig.font_path) != 0)
         textmode_reload_font();
+    webview_configure(work.web_view, work.web_port);   // no-op unless it changed
 
     // (Re)connect the host link when asked to, when the destination changed, or
     // when auto-reconnect was just switched on over a link that is already down.

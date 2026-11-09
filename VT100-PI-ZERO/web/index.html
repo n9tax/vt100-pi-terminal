@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VT100-PI</title>
+<!--
+  Live mirror of the VT100-PI-ZERO screen, served by the terminal itself
+  (src/net/webview.c). It draws the screen with the Pi's own glyph atlas and a
+  line-for-line port of textmode.c's draw_cell/blit_glyph, at the Pi's display
+  resolution, so this canvas holds the same pixels the HDMI output shows.
+
+  OBS: add a Browser Source with this URL, width/height = the Pi's display
+  mode (e.g. 1920x1080). Presentations: double-click for full screen.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%;
+           object-fit: contain; display: block; }
+  #msg { position: fixed; left: 12px; bottom: 10px; padding: 4px 8px;
+         font: 13px system-ui, sans-serif; color: #bbb;
+         background: rgba(0, 0, 0, .7); border-radius: 4px; }
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<div id="msg">Connecting&hellip;</div>
+<script>
+"use strict";
+const view = document.getElementById("screen");
+const vctx = view.getContext("2d");
+const note = document.getElementById("msg");
+
+// Must match textmode.h / glyphs.h.
+const MAXPEND = 16;            // rows of slide headroom, as textmode.c
+const DEC_BASE = 256;
+const ATTR_BOLD = 1, ATTR_UL = 2, ATTR_BLINK = 4, ATTR_REV = 8, ATTR_DECG = 0x10;
+const LINE_SINGLE = 0, LINE_DH_TOP = 2, LINE_DH_BOT = 3;
+
+let G = null;                  // geometry from the server's hello
+let atlas = null, atlasKey = "";
+let W = 0, H = 0, HEAD = 0;    // display size and headroom (px)
+let cells, lineAt;             // the mirrored grid: 4 bytes/cell, as cell_t
+let palRGB = new Array(16).fill(-1);
+let rv = 0, fl = 0, bk = 0, cs = 0, pps = 300, cu = [-1, 0];
+let drawnCur = [-1, 0];        // where our canvas has a cursor painted
+let tall, tctx, img, buf;      // tall pixel buffer: HEAD rows above the content
+let pending = 0;               // px of slide still to settle
+let d0 = Infinity, d1 = -1;    // dirty span of buf (rows) not yet uploaded
+let needPaint = false;
+let queue = [], loading = false;
+
+// ---- pixel helpers (same integer maths as textmode.c) -------------------
+const px = rgb => (0xff000000 | (rgb & 0xff) << 16 | (rgb & 0xff00) | (rgb >> 16 & 0xff)) >>> 0;
+const cx = col => Math.floor(col * W / G.cols);
+const cy = row => Math.floor(row * H / G.rows);
+function dirty(y0, y1) { if (y0 < d0) d0 = y0; if (y1 > d1) d1 = y1; }
+
+function blit(row, col, glyph, fg, bg, attr) {
+  const aw = G.aw, ah = G.ah, base = glyph * aw * ah;
+  const la = lineAt[row], wide = la !== LINE_SINGLE;
+  const x0 = cx(wide ? col * 2 : col), x1 = cx(wide ? col * 2 + 2 : col + 1);
+  const y0 = cy(row), y1 = cy(row + 1);
+  const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0);
+  const span = (la === LINE_DH_TOP || la === LINE_DH_BOT) ? (ah >> 1) : ah;
+  const off = la === LINE_DH_BOT ? ah - span : 0;
+  const ul = attr & ATTR_UL;
+  const FG = px(fg), BG = px(bg);
+  const fr = fg >> 16 & 255, fgn = fg >> 8 & 255, fb = fg & 255;
+  const br = bg >> 16 & 255, bgn = bg >> 8 & 255, bb = bg & 255;
+  for (let y = y0; y < y1 && y < H; ++y) {
+    const ay = off + Math.floor((y - y0) * span / ch);
+    const uline = ul && ay >= ah - 2;
+    const arow = base + ay * aw;
+    let o = (HEAD + y) * W + x0;
+    for (let x = x0; x < x1 && x < W; ++x, ++o) {
+      const a = uline ? 255 : atlas[arow + Math.floor((x - x0) * aw / cw)];
+      if (a === 0) buf[o] = BG;
+      else if (a === 255) buf[o] = FG;
+      else {
+        const r = Math.floor((fr * a + br * (255 - a)) / 255);
+        const g = Math.floor((fgn * a + bgn * (255 - a)) / 255);
+        const b = Math.floor((fb * a + bb * (255 - a)) / 255);
+        buf[o] = (0xff000000 | b << 16 | g << 8 | r) >>> 0;
+      }
+    }
+  }
+  dirty(HEAD + y0, HEAD + Math.min(y1, H));
+}
+
+function drawCell(row, col, cursor) {
+  if (lineAt[row] !== LINE_SINGLE && col >= G.cols / 2) return;
+  if (cursor) drawnCur = [row, col];
+  else if (row === drawnCur[0] && col === drawnCur[1]) drawnCur = [-1, 0];
+  const i = (row * G.cols + col) * 4;
+  const ch = cells[i], attr = cells[i + 3];
+  let fgi = cells[i + 1], bgi = cells[i + 2];
+  const hidden = (attr & ATTR_BLINK) && bk;
+  let glyph = hidden ? 32 : ch;
+  if (!hidden && (attr & ATTR_DECG) && ch >= 0x5f && ch <= 0x7e) glyph = DEC_BASE + (ch - 0x5f);
+  const rev = ((attr & ATTR_REV) ? 1 : 0) ^ rv ^ fl ^ (cursor ? 1 : 0);
+  if (rev) { const t = fgi; fgi = bgi; bgi = t; }
+  const fg = palRGB[(attr & ATTR_BOLD) ? ((fgi | 8) & 15) : (fgi & 15)];
+  const bg = palRGB[bgi & 15];
+  if (cursor && cs === 1) {
+    blit(row, col, glyph, palRGB[fgi & 15], palRGB[bgi & 15], attr);
+    const wide = lineAt[row] !== LINE_SINGLE;
+    const x0 = cx(wide ? col * 2 : col), x1 = cx(wide ? col * 2 + 2 : col + 1);
+    const y0 = cy(row), y1 = cy(row + 1);
+    const bar = Math.max(1, Math.floor((y1 - y0) / 12));
+    const P = px(palRGB[fgi & 15]);
+    for (let y = y1 - bar; y < y1 && y < H; ++y)
+      buf.fill(P, (HEAD + y) * W + x0, (HEAD + y) * W + Math.min(x1, W));
+    return;
+  }
+  blit(row, col, glyph, fg, bg, attr);
+}
+
+function renderRow(r) { for (let c = 0; c < G.cols; ++c) drawCell(r, c, false); }
+function renderAll() { for (let r = 0; r < G.rows; ++r) renderRow(r); }
+function anyBlink() {
+  for (let i = 3; i < cells.length; i += 4) if (cells[i] & ATTR_BLINK) return true;
+  return false;
+}
+
+function upload() {
+  if (d1 > d0) {
+    tctx.putImageData(img, 0, 0, 0, d0, W, d1 - d0);
+    needPaint = true;
+  }
+  d0 = Infinity; d1 = -1;
+}
+
+function unb64(s) {
+  const bin = atob(s), out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; ++i) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// ---- applying one update (same order the Pi did the work in) -------------
+function apply(m) {
+  let full = !!m.hello;
+  const rows = new Set();
+
+  // 1. Scroll: rows moved up k. A smooth slide moves the whole tall buffer so
+  //    the outgoing rows sit in the headroom and pan away; a jump shift only
+  //    moves the content.
+  if (m.k) {
+    const k = Math.min(m.k, G.rows);
+    cells.copyWithin(0, k * G.cols * 4);
+    lineAt.copyWithin(0, k);
+    const shift = k * G.lh * W;
+    if (m.sm) {
+      buf.copyWithin(0, Math.min(shift, buf.length));
+      pending = Math.min(HEAD, typeof m.pan === "number" ? m.pan : pending + k * G.lh);
+    } else {
+      buf.copyWithin(HEAD * W, Math.min(HEAD * W + shift, buf.length));
+      if (!G.exact) full = true;   // rows are not all lh tall: redraw in place
+    }
+    dirty(0, HEAD + H);
+    drawnCur = drawnCur[0] - k >= 0 ? [drawnCur[0] - k, drawnCur[1]] : [-1, 0];
+  } else if (m.pan === 0 && pending > G.lh / 2) {
+    pending = 0;                    // the Pi settled (or snapped) ahead of us
+    if (!G.exact) full = true;
+    needPaint = true;
+  }
+
+  // 2. Renderer state.
+  let blinkChanged = false;
+  if (m.st) {
+    const s = m.st;
+    for (let i = 0; i < 16; ++i) if (s.pal[i] !== palRGB[i]) { palRGB[i] = s.pal[i]; full = true; }
+    for (let r = 0; r < G.rows; ++r) if (s.ln[r] !== lineAt[r]) { lineAt[r] = s.ln[r]; rows.add(r); }
+    if (s.rv !== rv || s.fl !== fl) full = true;
+    if (s.bk !== bk) blinkChanged = true;
+    rv = s.rv; fl = s.fl; bk = s.bk; cs = s.cs; pps = s.pps; cu = s.cu;
+  }
+
+  // 3. Changed rows.
+  if (m.rows) for (const [r, b64] of m.rows) {
+    cells.set(unb64(b64).subarray(0, G.cols * 4), r * G.cols * 4);
+    rows.add(r);
+  }
+
+  // 4. Repaint what changed, the way textmode.c would have.
+  if (full || (blinkChanged && anyBlink())) renderAll();
+  else for (const r of rows) renderRow(r);
+
+  // 5. Cursor.
+  if (cu[0] !== drawnCur[0] || (cu[0] >= 0 && cu[1] !== drawnCur[1])) {
+    if (drawnCur[0] >= 0) drawCell(drawnCur[0], drawnCur[1], false);
+    if (cu[0] >= 0) drawCell(cu[0], cu[1], true);
+  }
+  upload();
+}
+
+// ---- connection ----------------------------------------------------------
+function hello(h) {
+  const key = [h.w, h.h, h.aw, h.ah, h.ng, h.gen].join("x");
+  G = h; W = h.w; H = h.h; HEAD = MAXPEND * h.lh;
+  pending = 0; drawnCur = [-1, 0];
+  if (!tall || tall.width !== W || tall.height !== HEAD + H) {
+    view.width = W; view.height = H;
+    tall = document.createElement("canvas");
+    tall.width = W; tall.height = HEAD + H;
+    tctx = tall.getContext("2d");
+    img = tctx.createImageData(W, HEAD + H);
+    buf = new Uint32Array(img.data.buffer);
+  }
+  cells = new Uint8Array(h.rows * h.cols * 4);
+  lineAt = new Uint8Array(h.rows);
+  if (key === atlasKey) return;
+  loading = true;
+  fetch("atlas?g=" + h.gen, { cache: "no-store" })
+    .then(r => r.arrayBuffer())
+    .then(ab => {
+      if (ab.byteLength !== h.ng * h.aw * h.ah) throw new Error("atlas size");
+      atlas = new Uint8Array(ab);
+      atlasKey = key;
+      loading = false;
+      const q = queue; queue = [];
+      for (const m of q) apply(m);
+    })
+    .catch(() => { loading = false; atlasKey = ""; es.close(); setTimeout(connect, 2000); });
+}
+
+let es;
+function connect() {
+  es = new EventSource("events");
+  es.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.hello) { queue = []; hello(m.hello); note.hidden = true; }
+    if (!G) return;
+    if (loading) queue.push(m); else apply(m);
+  };
+  es.onerror = () => { note.textContent = "Lost the terminal — reconnecting…"; note.hidden = false; };
+}
+connect();
+
+// ---- display: pan the window over the tall buffer, as present() does -----
+let last = performance.now();
+function frame(t) {
+  const dt = Math.min(t - last, 100);
+  last = t;
+  if (G && pending > 0) {
+    pending -= pps * dt / 1000;
+    if (pending <= 0) {
+      pending = 0;
+      if (!G.exact && atlas && !loading) { renderAll(); upload(); }
+    }
+    needPaint = true;
+  }
+  if (needPaint && G && atlas) {
+    vctx.drawImage(tall, 0, Math.round(HEAD - pending), W, H, 0, 0, W, H);
+    needPaint = false;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+view.addEventListener("dblclick", () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen().catch(() => {});
+});
+</script>
+</body>
+</html>

@@ -13,6 +13,16 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(DRM REQUIRED libdrm)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
 
+# The web view's page, compiled in (regenerated whenever web/index.html changes).
+set(WEB_INDEX_SRC ${CMAKE_CURRENT_SOURCE_DIR}/web/index.html)
+set(WEB_INDEX_C   ${CMAKE_CURRENT_BINARY_DIR}/web_index.c)
+add_custom_command(
+        OUTPUT  ${WEB_INDEX_C}
+        COMMAND ${CMAKE_COMMAND} -DIN=${WEB_INDEX_SRC} -DOUT=${WEB_INDEX_C}
+                -DNAME=web_index_html -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed.cmake
+        DEPENDS ${WEB_INDEX_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed.cmake
+        VERBATIM)
+
 add_executable(vt100-pi-zero
         src/main.c
         src/settings.c
@@ -34,6 +44,8 @@ add_executable(vt100-pi-zero
         src/net/telnet.c
         src/net/netlink.c
         src/net/hostconn.c
+        src/net/webview.c
+        ${WEB_INDEX_C}
         )
 
 target_include_directories(vt100-pi-zero PRIVATE

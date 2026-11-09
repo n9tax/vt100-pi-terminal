@@ -45,6 +45,12 @@ static const char *DEFAULT_FILE =
     "# down until you reconnect from Setup (Ctrl+F3 -> Host link -> Enter).\n"
     "auto_reconnect = on\n"
     "\n"
+    "# ---- Web view ----\n"
+    "# Mirror the screen to a web page (OBS Browser Source, a projector):\n"
+    "# http://<this Pi>:<web_port>/ . No login -- anyone on the network can watch.\n"
+    "web_view = off\n"
+    "web_port = " STR(WEB_PORT_DEFAULT) "\n"
+    "\n"
     "# ---- Display ----\n"
     "theme      = amber      # color amber green white blue red yellow c64 vic20 c128 borland custom\n"
     "cursor     = block      # block | underline\n"
@@ -122,6 +128,8 @@ static void set_defaults(void) {
     snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", SSH_HOST_DEFAULT);
     g_settings.ssh_port = SSH_PORT_DEFAULT;
     g_settings.local_shell = LOCAL_SHELL_DEFAULT;
+    g_settings.web_view = WEB_VIEW_DEFAULT;
+    g_settings.web_port = WEB_PORT_DEFAULT;
     g_settings.auto_reconnect = AUTO_RECONNECT_DEFAULT;
 }
 
@@ -186,6 +194,8 @@ static void apply(const char *key, const char *val) {
     else if (!strcasecmp(key, "ssh_host"))      snprintf(g_settings.ssh_host, sizeof g_settings.ssh_host, "%s", val);
     else if (!strcasecmp(key, "ssh_port"))      g_settings.ssh_port = clampi(atoi(val), 1, 65535);
     else if (!strcasecmp(key, "local_shell"))   g_settings.local_shell = parse_bool(val, g_settings.local_shell);
+    else if (!strcasecmp(key, "web_view"))      g_settings.web_view = parse_bool(val, g_settings.web_view);
+    else if (!strcasecmp(key, "web_port"))      g_settings.web_port = clampi(atoi(val), 1, 65535);
     else if (!strcasecmp(key, "auto_reconnect")) g_settings.auto_reconnect = parse_bool(val, g_settings.auto_reconnect);
     else fprintf(stderr, "settings: ignoring unknown key '%s'\n", key);
 }
@@ -280,6 +290,12 @@ void settings_save(void) {
         "# Off = it stays down until Setup (Ctrl+F3) -> Host link -> Enter.\n"
         "auto_reconnect = %s\n"
         "\n"
+        "# ---- Web view ----\n"
+        "# Mirror the screen to http://<this Pi>:<web_port>/ (OBS, a projector).\n"
+        "# No login -- anyone on the network can watch.\n"
+        "web_view = %s\n"
+        "web_port = %d\n"
+        "\n"
         "# ---- Display ----\n"
         "theme      = %s      # color amber green white blue red yellow c64 vic20 c128 borland custom\n"
         "cursor     = %s      # block | underline\n"
@@ -310,6 +326,7 @@ void settings_save(void) {
         g_settings.local_shell ? "on" : "off",
         g_settings.ssh_host, g_settings.ssh_port, g_settings.telnet_host, g_settings.telnet_port,
         g_settings.auto_reconnect ? "on" : "off",
+        g_settings.web_view ? "on" : "off", g_settings.web_port,
         settings_theme_name(g_settings.theme),
         g_settings.cursor_style ? "underline" : "block",
         g_settings.local_echo ? "on" : "off",

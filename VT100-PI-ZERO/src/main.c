@@ -27,6 +27,7 @@
 #include "io/kbd_evdev.h"
 #include "io/host_link.h"
 #include "net/hostconn.h"
+#include "net/webview.h"
 #include "update.h"
 #include "terminal/screen.h"
 #include "terminal/vt100.h"
@@ -149,10 +150,11 @@ static void net_emit(uint8_t b) { inbuf_push(b); }
 
 // Main-loop poll() slots: 0 = serial, 1 = DRM page-flip events, 2 = network,
 // 3 = keyboard hotplug (inotify), 4.. = keyboard nodes (a composite keyboard
-// contributes several).
+// contributes several), then the web view's listener and browsers.
 #define PFD_HOTPLUG 3
 #define PFD_KBD0  4
-#define PFD_COUNT (PFD_KBD0 + KBD_MAX_DEVS)
+#define PFD_WEB0  (PFD_KBD0 + KBD_MAX_DEVS)
+#define PFD_COUNT (PFD_WEB0 + WEBVIEW_POLL_SLOTS)
 
 // Safety-net rescan interval. Hotplug is event-driven via inotify; this only
 // covers the case where inotify could not be started, and is gated on not being
@@ -186,6 +188,8 @@ int main(void) {
     hostconn_set_emit(net_emit);
     hostconn_start();
 
+    webview_configure(g_settings.web_view, g_settings.web_port);
+
     // Neither transport came up. Not fatal -- the display and keyboard work, and
     // Setup can fix it -- but say so plainly, because the screen will otherwise
     // just sit there looking broken.
@@ -216,12 +220,14 @@ int main(void) {
         pfds[2].fd = hostconn_fd();  // changes on connect/disconnect
         for (int i = 0; i < KBD_MAX_DEVS; ++i)
             pfds[PFD_KBD0 + i].fd = kbd_fd_at(i);   // -1 past the open count
+        webview_fill_pollfds(&pfds[PFD_WEB0]);
 
         // Wake on I/O or the vblank flip event; a short timeout keeps a smooth
         // scroll advancing when nothing else is happening.
         poll(pfds, PFD_COUNT, (textmode_scroll_busy() || textmode_flip_pending()) ? 15 : 50);
 
         if (pfds[1].revents & POLLIN) textmode_handle_flip();   // a page flip completed
+        webview_service(&pfds[PFD_WEB0]);   // browsers connecting / draining
 
         // Any keyboard event -- readable or in error. kbd_poll() decodes what it
         // can and drops nodes that have gone away (USB suspend, unplug), which
@@ -381,5 +387,6 @@ int main(void) {
         }
 
         textmode_present();   // publish the shadow to the display (vsync flip) if it changed
+        webview_tick();       // and the same changes to any browsers watching
     }
 }

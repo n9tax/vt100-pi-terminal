@@ -170,6 +170,14 @@
 #define LOCAL_SHELL_USER    ""
 #define UPDATE_CONF_PATH    "/etc/vt100-pi/update.conf"
 
+// ---- Web view ---------------------------------------------------------------
+// Mirror the screen to a web page on the Pi (for OBS or a projector): open
+// http://<this Pi>:<port>/ in any browser. Off by default -- the page shows
+// whatever is on screen to anyone on the network, with no login.
+#define WEB_VIEW_DEFAULT  0
+#define WEB_PORT_DEFAULT  8080
+#define WEB_MAX_CLIENTS   6         // simultaneous browsers (OBS + a few viewers)
+
 // ---- Reconnect --------------------------------------------------------------
 // A network/PTY host link can end at any time (server reboot, ssh timeout, a
 // pulled cable, `exit` in the shell). When auto-reconnect is on, the link is

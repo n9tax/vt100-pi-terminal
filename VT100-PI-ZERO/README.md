@@ -288,6 +288,30 @@ The keyboard maps the VT100's keys onto a PC one:
 The keypad sends digits in numeric mode and `ESC O p`... in application mode
 (`ESC =`), as editors like KED and EDT expect. Num Lock state is ignored.
 
+### Web view (OBS, presentations)
+
+The terminal can mirror its screen to a web page, for recording videos or
+putting it on a projector. In Setup (Ctrl+F3) turn **Web view** on (and
+change **Web port** if 8080 is taken), press Enter, and the row shows the
+address: `http://<this Pi>:8080/`. Or set `web_view = on` / `web_port` in
+`vt100.conf`.
+
+- **OBS:** add a *Browser Source* with that URL, and set its width and height
+  to the Pi's display mode (e.g. 1920 x 1080) so it shows 1:1.
+- **A browser:** open the URL. Double-click for full screen.
+
+The page does not receive video. The Pi streams screen *changes* (cells,
+colours, cursor, scrolls) and the page redraws them with the Pi's own glyph
+atlas and the same drawing code as the HDMI renderer. The browser therefore
+shows the same pixels as the monitor, including themes, smooth scroll,
+double-size lines and DEC graphics, and it stays sharp when OBS scales it.
+That costs the Pi almost nothing (a few kB/s while text is moving) and works
+over the Zero's Wi-Fi, which could not carry 1080p video. Up to 6 browsers can
+watch at once; each one that connects gets the current screen straight away.
+
+The page is view-only, and has **no login**: anyone who can reach the Pi's
+port can watch the screen, so leave it off on networks you don't trust.
+
 ## Boot straight into the terminal (kiosk mode)
 
 ```
@@ -425,6 +449,13 @@ serial_linux.c --> vt100_feed --> vtparse.c (DEC/ANSI state machine)
 - `src/io/kbd_evdev.c/.h` — raw evdev keyboard reader (no libinput/X11/
   Wayland dependency), replacing the Pico's TinyUSB HID decode on core1.
   Same DECCKM-aware key -> VT100-escape logic, against Linux keycodes.
+- `src/net/webview.c/.h` + `web/index.html` — **new**. The web view: a
+  small non-blocking HTTP server in the main `poll()` loop that streams
+  screen diffs as Server-Sent Events. `textmode_get_view()` exposes what the
+  renderer is drawing (palette, cursor, line sizes, smooth-scroll slides).
+  The page ports `draw_cell`/`blit_glyph` to JavaScript, so a change to how
+  textmode.c draws must be mirrored there. The page is compiled into the
+  binary by `cmake/embed.cmake`.
 - `src/video/font_8x16.h` — ported unmodified (VGA bitmap glyph data); no
   longer the render path (FreeType is), kept as a fallback / reference.
 

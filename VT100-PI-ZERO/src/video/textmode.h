@@ -104,6 +104,24 @@ void textmode_handle_flip(void);   // call when drm_fd is readable
 void textmode_present(void);       // publish the shadow (copy + flip if changed)
 int  textmode_flip_pending(void);  // 1 while a flip is awaiting vblank
 
+// ---- Mirror (web view) -------------------------------------------------------
+// What the renderer is drawing right now, beyond the cell grid itself, so a
+// remote copy (net/webview.c -> a browser) can reproduce the same pixels from
+// the same atlas. Read-only snapshot; nothing here changes the display.
+typedef struct {
+    uint32_t pal[16];            // 0xRRGGBB per ANSI index, as currently resolved
+    uint8_t  line[TERM_ROWS];    // effective line size per row (single under Setup)
+    int      reverse, flash, blink, cursor_style;
+    int      cur_row, cur_col;   // cell the cursor is painted on; cur_row -1 = none
+    int      smooth, pps;        // smooth scroll on, and its speed in px/s
+    int      pan;                // px of slide still to settle (0 = at rest)
+    unsigned slides;             // smooth one-line slides so far (free-running)
+    unsigned atlas_gen;          // bumps whenever the glyph atlas is rebuilt
+    int      exact_rows;         // 1 = every row is line_h tall (no settle repaint)
+} tm_view_t;
+void textmode_get_view(tm_view_t *v);
+void textmode_geometry(int *width, int *height, int *line_height);
+
 // Convenience for the boot splash: write a string starting at (row,col).
 void tm_puts(int row, int col, const char *s, uint8_t fg, uint8_t bg, uint8_t attr);
 

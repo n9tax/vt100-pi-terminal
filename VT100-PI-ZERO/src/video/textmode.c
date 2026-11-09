@@ -48,6 +48,13 @@ static int screen_reverse = 0;      // DECSCNM
 static int flash_on = 0;            // visual bell
 static int blink_phase = 0;
 
+// Mirror bookkeeping (textmode_get_view): where the cursor is painted, how many
+// smooth slides have happened, and which atlas is current.
+static int cur_row = -1, cur_col = 0;
+static unsigned slide_count = 0;
+static unsigned atlas_gen = 0;
+static int cur_pps = 300;
+
 // ---- smooth scroll state ---------------------------------------------------
 // Free-running scrolling framebuffer: the live content is rendered at base_y in
 // a taller buffer, and each scroll just advances base_y by one row and renders
@@ -244,6 +251,8 @@ static void draw_cell(int row, int col, int cursor) {
     // The right half of a double-size row is off screen: its pixels belong to
     // the doubled cells of the left half.
     if (line_attr(row) != LINE_SINGLE && col >= TERM_COLS / 2) return;
+    if (cursor)                                  { cur_row = row; cur_col = col; }
+    else if (row == cur_row && col == cur_col)   cur_row = -1;   // painted over
     cell_t c = tm_cells[row][col];
     int hidden = (c.attr & ATTR_BLINK) && blink_phase;
     int glyph = hidden ? ' ' : c.glyph;
@@ -283,6 +292,7 @@ void textmode_init(void) {
     int cell_w = ((int)fb_width  + TERM_COLS - 1) / TERM_COLS;
     int cell_h = ((int)fb_height + TERM_ROWS - 1) / TERM_ROWS;
     glyphs_init(cell_w, cell_h);
+    ++atlas_gen;
 
     // Tall render buffer: headroom above the content for scrolled-off (outgoing)
     // rows the window pans over, plus REBASE_GAP rows below so base_y can free-run
@@ -310,6 +320,7 @@ void textmode_reload_font(void) {
     int cell_w = ((int)fb_width  + TERM_COLS - 1) / TERM_COLS;
     int cell_h = ((int)fb_height + TERM_ROWS - 1) / TERM_ROWS;
     glyphs_init(cell_w, cell_h);   // re-renders atlas from g_settings.font_path
+    ++atlas_gen;
     textmode_render_all();
 }
 
@@ -374,11 +385,13 @@ int textmode_smooth_enabled(void) { return smooth_on; }
 // Speed alone, leaving the on/off state untouched -- the auto-speed controller
 // retunes this several times a second and must not care about smooth_on.
 void textmode_set_scroll_speed(int pps) {
+    if (pps > 0) cur_pps = pps;
     if (pps > 0) { base_step = pps * 256 / 60; if (base_step < 1) base_step = 1; }
 }
 
 void textmode_set_smooth(int on, int pps) {
     smooth_on = on ? 1 : 0;
+    if (pps > 0) cur_pps = pps;
     if (pps > 0) { base_step = pps * 256 / 60; if (base_step < 1) base_step = 1; }  // px/frame * 256
     if (!smooth_on) textmode_scroll_snap();
 }
@@ -402,6 +415,8 @@ void textmode_smooth_line(void) {
     // row -- so all we render is the new bottom row. No per-scroll bulk move.
     base_y += line_h;
     fb_mem = tall_mem + (size_t)base_y * fb_pitch;
+    ++slide_count;
+    if (cur_row >= 0) --cur_row;   // a painted cursor rides up with its pixels
     for (int c = 0; c < TERM_COLS; ++c) draw_cell(TERM_ROWS - 1, c, 0);
 
     if (d + line_h > headroom) d = 0;      // slide would exceed the headroom -> settle (jump)
@@ -499,4 +514,28 @@ void tm_puts(int row, int col, const char *s, uint8_t fg, uint8_t bg, uint8_t at
         tm_cells[row][col + i] = (cell_t){ (uint8_t)s[i], fg, bg, attr };
         textmode_render_cell(row, col + i);
     }
+}
+
+// ---- mirror ----------------------------------------------------------------
+void textmode_get_view(tm_view_t *v) {
+    for (int i = 0; i < 16; ++i) v->pal[i] = palette_rgb((uint8_t)i);
+    for (int r = 0; r < TERM_ROWS; ++r) v->line[r] = (uint8_t)line_attr(r);
+    v->reverse = screen_reverse;
+    v->flash = flash_on;
+    v->blink = blink_phase;
+    v->cursor_style = cursor_style;
+    v->cur_row = cur_row;
+    v->cur_col = cur_row >= 0 ? cur_col : 0;
+    v->smooth = smooth_on;
+    v->pps = cur_pps;
+    v->pan = d;
+    v->slides = slide_count;
+    v->atlas_gen = atlas_gen;
+    v->exact_rows = exact_rows;
+}
+
+void textmode_geometry(int *width, int *height, int *line_height) {
+    *width = (int)fb_width;
+    *height = (int)fb_height;
+    *line_height = line_h;
 }

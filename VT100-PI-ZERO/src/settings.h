@@ -40,6 +40,8 @@ typedef struct {
     int  ssh_port;          // default 22 (22 = leave it to ssh / ~/.ssh/config)
     int  local_shell;       // 1 = connect a local Pi shell (highest priority)
     int  auto_reconnect;    // 1 = re-dial a dropped ssh/telnet/shell link
+    int  web_view;          // 1 = mirror the screen to http://<pi>:web_port/
+    int  web_port;          // default 8080
 } settings_t;
 
 extern settings_t g_settings;
